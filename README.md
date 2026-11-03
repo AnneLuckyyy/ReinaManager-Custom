@@ -16,25 +16,30 @@ The `Reina` in the name is the character <a href="https://vndb.org/c64303"><b>�
 </div>
 
 > [!IMPORTANT]
-> This is an independent, non-official modified edition of [huoshen80/ReinaManager](https://github.com/huoshen80/ReinaManager). It is not maintained by, endorsed by, or compatible with the upstream release channel. Please report issues for this edition in this repository, not to the upstream project.
+> This is a community-maintained edition based on [huoshen80/ReinaManager](https://github.com/huoshen80/ReinaManager). It has its own app identity and release page and does not follow the upstream update channel. Issues specific to this edition are welcome in this repository.
 
 Modified edition repository: [AnneLuckyyy/ReinaManager-Custom](https://github.com/AnneLuckyyy/ReinaManager-Custom).
 
 > [!NOTE]
-> This edition keeps the upstream AGPL-3.0 license and copyright notices. See [LICENSE](./LICENSE) and [NOTICE.md](./NOTICE.md). Parts of the implementation and documentation were produced with AI assistance; the publisher remains responsible for review, release decisions, and license compliance.
+> This edition keeps the upstream AGPL-3.0 license and copyright notices. See [LICENSE](./LICENSE) and [NOTICE.md](./NOTICE.md). Some changes and documentation were made with AI assistance, then reviewed and verified before being committed.
 
 ## What this edition changes
 
-- Adds local-first workflows for bulk game import, folder-to-category bindings, application shortcuts, archive verification, and guarded download automation.
-- Keeps advanced workflows out of normal browsing screens. Complex settings use a compact help entry: hover for a short explanation and click for a practical guide.
-- Uses no personal default folders or executable paths in a fresh installation. Configure optional tool paths and folder associations in **Settings** when needed.
-- Adds safeguards around destructive actions. Archive deletion is opt-in, independently verified, and refuses the direct child folders of a drive-level `Games` directory by default.
+- ReinaManager 0.20.4 already provides metadata lookup, collections, play tracking, save management, and basic bulk operations. This edition focuses on making a local game library easier to organize, move, and maintain.
+- **Local import and metadata matching**: multiple default scan roots, deep launch-file scanning, cross-drive path deduplication, manual Bangumi/DLsite source selection, and a direct “open folder” check from every import row. Unlisted folders and their reasons remain visible.
+- **Paths, launching, and cloud state**: primary and fallback paths retain history; failed launches can try a configured drive-letter replacement; a game can be marked as cloud-only from the context menu; opening a game folder can fall back to its parent directory.
+- **Automatic organization and application management**: multiple local source folders can map to collection categories. Single import, bulk import, and download/install import append the matching category. The applications page accepts `.lnk`, `.url`, and `.exe` drops and can manually scan configured source folders.
+- **Backups, restore, and covers**: database backup and restore include settings and application-page data. Custom covers are backed up separately from network-cover cache. Monthly and on-exit backups are available.
+- **Downloads and game archives**: download tasks can safely auto-import, clean up their task files, and continue later tasks. Games can be queued for 7-Zip archiving, verified, then optionally moved to the Recycle Bin or deleted. Removing originals always requires an explicit choice, and direct children of any drive-level `Games` folder are protected by default.
+- **Settings made easier to manage**: settings are grouped by feature, with separate pages for paths and folder bindings. Regular help icons give a short hint; complex options can open a fuller guide. Fresh installs do not include personal folders or external-tool paths.
 
-## Before using or contributing
+This repository may also selectively integrate suitable compatibility improvements from later upstream versions. Those integrations are not presented as original features of this edition; their differences are recorded in the change history.
 
-- This project is currently developed and tested primarily on Windows. Do not assume that every customized workflow is cross-platform.
-- Never commit local databases, cover archives, API tokens, downloaded files, signed installers, or private keys. The repository `.gitignore` contains the baseline exclusions; review `git status` before every commit.
-- Upstream and this edition can evolve separately. Treat the local database as user data and make a backup before trying an untested build.
+## Using and contributing
+
+- Windows is the primary development and verification platform. Basic use on other platforms may work, but extended workflows are not guaranteed to behave identically.
+- Issues and improvements are welcome. Before contributing, make sure a commit does not include local databases, cover archives, tokens, downloaded files, installers, or private keys. `.gitignore` is only a baseline; review `git status` first.
+- This edition and upstream evolve separately. Back up your database before trying a test build or manually installing a new version.
 
 ## Stacks
 
