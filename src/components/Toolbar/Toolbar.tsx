@@ -1,0 +1,504 @@
+/**
+ * @file Toolbar 组件与工具函数
+ * @description 提供应用主界面顶部工具栏、按钮组、弹窗控制等功能，支持添加、排序、筛选、启动、删除、编辑、外链等操作，适配不同页面，集成国际化
+ * @module src/components/Toolbar/index
+ * @author ReinaManager
+ * @copyright AGPL-3.0
+ *
+ * 主要导出：
+ * - Toolbars：主工具栏组件
+ * - Buttongroup：按钮组组件（根据页面类型切换）
+ * - Group：分组选择组件
+ * - useModal：通用弹窗控制 Hook
+ * - ToLibraries：返回游戏库按钮
+ * - DeleteModal：删除游戏弹窗
+ *
+ * 依赖：
+ * - @mui/material
+ * - @mui/icons-material
+ * - @toolpad/core/DashboardLayout
+ * - @/components/AddModal
+ * - @/components/FilterSortModal
+ * - @/components/LaunchModal
+ * - @/components/AlertBox
+ * - @/store
+ * - @/utils
+ * - react-router
+ * - react-i18next
+ * - @tauri-apps/api/core
+ */
+
+import AddIcon from "@mui/icons-material/Add";
+import CloseIcon from "@mui/icons-material/Close";
+import DeleteIcon from "@mui/icons-material/Delete";
+import FolderOpenIcon from "@mui/icons-material/FolderOpen";
+import MoreVertIcon from "@mui/icons-material/MoreVert";
+import OpenInFullIcon from "@mui/icons-material/OpenInFull";
+import TurnRightIcon from "@mui/icons-material/TurnRight";
+import Box from "@mui/material/Box";
+import ListItemIcon from "@mui/material/ListItemIcon";
+import ListItemText from "@mui/material/ListItemText";
+import Menu from "@mui/material/Menu";
+import MenuItem from "@mui/material/MenuItem";
+import Stack from "@mui/material/Stack";
+import Switch from "@mui/material/Switch";
+import { open as openurl } from "@tauri-apps/plugin-shell";
+import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router-dom";
+import { ApplicationsToolbar } from "./ApplicationsToolbar";
+import { ToolbarIconAction } from "./ToolbarIconAction";
+import { AlertConfirmBox } from "@/components/AlertBox";
+import { FilterSortModal } from "@/components/FilterSortModal";
+import { LaunchModal } from "@/components/LaunchModal";
+import { PathSettingsModal } from "@/components/PathSettingsModal";
+import { PlayStatusSubmenu } from "@/components/RightMenu/PlayStatusSubmenu";
+import { SelectedGameGuard } from "@/components/SelectedGameGuard";
+import { useGameStatusActions } from "@/hooks/features/games/useGameStatusActions";
+import { useDeleteGame, useUpdateGame } from "@/hooks/queries/useGames";
+import { useAllSettings } from "@/hooks/queries/useSettings";
+import { snackbar } from "@/providers/snackBar";
+import { useStore } from "@/store/appStore";
+import type { GameData, SourceType } from "@/types";
+import type { PlayStatus } from "@/types/collection";
+import { handleOpenFolder } from "@/utils/appUtils";
+import { CollectionToolbar } from "./Collection";
+
+const SOURCE_ICON_URLS: Record<SourceType, string> = {
+	bgm: "https://bgm.tv/img/favicon.ico",
+	kun: "https://www.kungal.com/favicon.ico",
+	vndb: "https://vndb.org/favicon.ico",
+	ymgal: "https://www.ymgal.games/favicon.ico",
+	dlsite: "https://www.dlsite.com/images/web/common/favicon.ico",
+};
+
+const SourceLinkIcon = ({ source }: { source: SourceType }) => {
+	const [failed, setFailed] = useState(false);
+
+	if (failed) {
+		return <CloseIcon fontSize="small" sx={{ color: "error.main" }} />;
+	}
+
+	return (
+		<Box
+			component="img"
+			src={SOURCE_ICON_URLS[source]}
+			alt={`${source} favicon`}
+			onError={() => setFailed(true)}
+			sx={{
+				width: 16,
+				height: 16,
+				margin: "2px",
+				borderRadius: "4px",
+				objectFit: "contain",
+			}}
+		/>
+	);
+};
+
+/**
+ * 按钮组属性类型
+ */
+interface ButtonGroupProps {
+	isLibraries: boolean;
+	isDetail: boolean;
+	isCollection: boolean;
+}
+
+/**
+ * 通用弹窗控制 Hook
+ * 用于管理弹窗的打开与关闭，并自动处理焦点恢复。
+ *
+ * @returns {object} 弹窗状态与控制方法
+ */
+export const useModal = () => {
+	const [isopen, setisopen] = useState(false);
+	const previousFocus = useRef<HTMLElement | null>(null);
+
+	const handleOpen = () => {
+		// 记录当前聚焦元素
+		previousFocus.current = document.activeElement as HTMLElement;
+		setisopen(true);
+	};
+
+	const handleClose = () => {
+		setisopen(false);
+		// 弹窗关闭后恢复焦点
+		if (previousFocus.current) {
+			previousFocus.current.focus();
+		}
+	};
+	return { isopen, handleOpen, handleClose };
+};
+
+/**
+ * 打开游戏文件夹按钮
+ * 订阅 allGames 确保当游戏 localpath 更新时按钮状态同步
+ * @returns {JSX.Element}
+ */
+const OpenFolder = ({ selectedGame }: { selectedGame: GameData }) => {
+	const { t } = useTranslation();
+	const isDisabled = selectedGame.launch_type === "steam"
+		? selectedGame.steam_monitor_path == null
+		: !selectedGame.localpath?.trim() && !selectedGame.custom_data?.extraLocalPaths?.some((path) => path.trim());
+
+	return (
+		<ToolbarIconAction
+			label={t("components.Toolbar.openGameFolder", "打开游戏目录")}
+			disabled={isDisabled}
+			onClick={() => handleOpenFolder(selectedGame)}
+		>
+			<FolderOpenIcon />
+		</ToolbarIconAction>
+	);
+};
+
+/**
+ * 删除游戏弹窗组件
+ * @param {object} props
+ * @param {number} props.id 游戏ID
+ * @returns {JSX.Element}
+ */
+export const DeleteModal: React.FC<{ id: number }> = ({ id }) => {
+	const { t } = useTranslation();
+	const setSelectedGameId = useStore((state) => state.setSelectedGameId);
+	const [openAlert, setOpenAlert] = useState(false);
+	const [isDeleting, setIsDeleting] = useState(false);
+	const deleteGameMutation = useDeleteGame();
+	const navigate = useNavigate();
+
+	/**
+	 * 删除游戏操作
+	 */
+	const handleDeleteGame = async () => {
+		try {
+			setIsDeleting(true);
+			await deleteGameMutation.mutateAsync(id);
+			setSelectedGameId(null);
+			navigate(-1);
+		} catch (error) {
+			console.error("删除游戏失败:", error);
+		} finally {
+			setIsDeleting(false);
+			setOpenAlert(false);
+		}
+	};
+
+	return (
+		<>
+			<ToolbarIconAction
+				label={
+					isDeleting
+						? t("components.Toolbar.deleting", "删除中...")
+						: t("components.Toolbar.deleteGame", "删除游戏")
+				}
+				color="error"
+				disabled={isDeleting}
+				onClick={() => setOpenAlert(true)}
+			>
+				<DeleteIcon />
+			</ToolbarIconAction>
+			<AlertConfirmBox
+				open={openAlert}
+				setOpen={setOpenAlert}
+				onConfirm={handleDeleteGame}
+				isLoading={isDeleting}
+			/>
+		</>
+	);
+};
+
+/**
+ * 详情页更多操作按钮（外链等）
+ * @returns {JSX.Element}
+ */
+const MoreButton = ({ selectedGame }: { selectedGame: GameData }) => {
+	const updateGameMutation = useUpdateGame();
+	const { t } = useTranslation();
+	const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+	const open = Boolean(anchorEl);
+	const [pathSettingsModalOpen, setPathSettingsModalOpen] = useState(false);
+	const { data: settings } = useAllSettings();
+	const hasLePath = Boolean(settings?.le_path);
+	const hasMagpiePath = Boolean(settings?.magpie_path);
+
+	// 使用 Feature Facade 更新游戏状态
+	const { updatePlayStatus } = useGameStatusActions();
+	const gameId = selectedGame.id;
+
+	const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+		setAnchorEl(event.currentTarget);
+	};
+
+	const handleClose = () => {
+		setAnchorEl(null);
+	};
+
+	/**
+	 * 跳转到外部链接
+	 * @param {string} type 链接类型（bgm/vndb/ymgal/kun）
+	 */
+	const handleView = (type: string) => {
+		if (type === "bgm") {
+			openurl(`https://bgm.tv/subject/${selectedGame.bgm_id}`);
+		} else if (type === "vndb") {
+			openurl(`https://vndb.org/${selectedGame.vndb_id}`);
+		} else if (type === "ymgal") {
+			openurl(`https://www.ymgal.games/ga${selectedGame.ymgal_id}`);
+		} else if (type === "kun") {
+			openurl(`https://www.kungal.com/galgame/${selectedGame.kun_id}`);
+		}
+	};
+
+	/**
+	 * 更新游戏状态
+	 */
+	const handlePlayStatusChange = (newStatus: PlayStatus) => {
+		updatePlayStatus({ gameId, newStatus });
+	};
+
+	/**
+	 * 切换LE转区启动状态
+	 */
+	const handleToggleLeLaunch = async () => {
+		const nextEnabled = selectedGame.le_launch !== 1;
+
+		if (nextEnabled && !hasLePath) {
+			snackbar.warning(
+				t(
+					"components.Toolbar.lePathNotSet",
+					"未设置LE转区软件路径，请先配置路径",
+				),
+			);
+			setPathSettingsModalOpen(true);
+			return;
+		}
+
+		try {
+			await updateGameMutation.mutateAsync({
+				gameId,
+				updates: { le_launch: nextEnabled ? 1 : 0 },
+			});
+		} catch (error) {
+			console.error("更新LE转区启动状态失败:", error);
+		}
+	};
+
+	/**
+	 * 切换Magpie放大状态
+	 */
+	const handleToggleMagpie = async () => {
+		const nextEnabled = selectedGame.magpie !== 1;
+
+		if (nextEnabled && !hasMagpiePath) {
+			snackbar.warning(
+				t(
+					"components.Toolbar.magpiePathNotSet",
+					"未设置Magpie软件路径，请先配置路径",
+				),
+			);
+			setPathSettingsModalOpen(true);
+			return;
+		}
+
+		try {
+			await updateGameMutation.mutateAsync({
+				gameId,
+				updates: { magpie: nextEnabled ? 1 : 0 },
+			});
+		} catch (error) {
+			console.error("更新Magpie放大状态失败:", error);
+		}
+	};
+
+	return (
+		<>
+			<ToolbarIconAction
+				label={t("components.Toolbar.more", "更多")}
+				onClick={handleClick}
+			>
+				<MoreVertIcon />
+			</ToolbarIconAction>
+			<Menu
+				id="more-menu"
+				anchorEl={anchorEl}
+				open={open}
+				onClose={handleClose}
+				transitionDuration={0}
+			>
+				{selectedGame.bgm_id ? (
+					<MenuItem
+						onClick={() => {
+							handleView("bgm");
+							handleClose();
+						}}
+					>
+						<ListItemIcon>
+							<SourceLinkIcon source="bgm" />
+						</ListItemIcon>
+						<ListItemText>
+							{t("components.Toolbar.bgmlink", "查看Bangumi页面")}
+						</ListItemText>
+					</MenuItem>
+				) : null}
+				{selectedGame.vndb_id ? (
+					<MenuItem
+						onClick={() => {
+							handleView("vndb");
+							handleClose();
+						}}
+					>
+						<ListItemIcon>
+							<SourceLinkIcon source="vndb" />
+						</ListItemIcon>
+						<ListItemText>
+							{t("components.Toolbar.vndblink", "查看Vndb页面")}
+						</ListItemText>
+					</MenuItem>
+				) : null}
+				{selectedGame.ymgal_id ? (
+					<MenuItem
+						onClick={() => {
+							handleView("ymgal");
+							handleClose();
+						}}
+					>
+						<ListItemIcon>
+							<SourceLinkIcon source="ymgal" />
+						</ListItemIcon>
+						<ListItemText>
+							{t("components.Toolbar.ymgallink", "月幕Gal页面")}
+						</ListItemText>
+					</MenuItem>
+				) : null}
+				{selectedGame.kun_id ? (
+					<MenuItem
+						onClick={() => {
+							handleView("kun");
+							handleClose();
+						}}
+					>
+						<ListItemIcon>
+							<SourceLinkIcon source="kun" />
+						</ListItemIcon>
+						<ListItemText>
+							{t("components.Toolbar.kunlink", "查看Kungal页面")}
+						</ListItemText>
+					</MenuItem>
+				) : null}
+				<MenuItem onClick={handleToggleLeLaunch}>
+					<ListItemIcon>
+						<TurnRightIcon fontSize="small" />
+					</ListItemIcon>
+					<ListItemText>
+						{t("components.Toolbar.leLaunch", "LE转区启动")}
+					</ListItemText>
+					<Switch checked={selectedGame.le_launch === 1} size="small" />
+				</MenuItem>
+				<MenuItem onClick={handleToggleMagpie}>
+					<ListItemIcon>
+						<OpenInFullIcon fontSize="small" />
+					</ListItemIcon>
+					<ListItemText>
+						{t("components.Toolbar.magpieZoom", "Magpie放大")}
+					</ListItemText>
+					<Switch checked={selectedGame.magpie === 1} size="small" />
+				</MenuItem>
+
+				{/* 游戏状态切换 - 二级菜单 */}
+				<PlayStatusSubmenu
+					currentStatus={selectedGame.clear}
+					onStatusChange={handlePlayStatusChange}
+					iconSize="small"
+					expandDirection="left"
+				/>
+			</Menu>
+
+			{/* 路径设置弹窗 */}
+			<PathSettingsModal
+				open={pathSettingsModalOpen}
+				onClose={() => setPathSettingsModalOpen(false)}
+				inSettingsPage={false}
+			/>
+		</>
+	);
+};
+
+/**
+ * 顶部按钮组组件，根据页面类型切换显示内容
+ * @param {ButtonGroupProps} props
+ * @returns {JSX.Element}
+ */
+export const Buttongroup = ({
+	isLibraries,
+	isDetail,
+	isCollection,
+}: ButtonGroupProps) => {
+	const { t } = useTranslation();
+	const openAddModal = useStore((state) => state.openAddModal);
+	const cardsBatchMode = useStore((state) => state.cardsBatchMode);
+	const detailFallback = null;
+
+	return (
+		<>
+			{isDetail && (
+				<SelectedGameGuard
+					fallback={detailFallback}
+					loadingFallback={detailFallback}
+					notFoundFallback={detailFallback}
+				>
+					{(selectedGame) => (
+						<>
+							<LaunchModal compact />
+							<OpenFolder selectedGame={selectedGame} />
+							<DeleteModal id={selectedGame.id} />
+							<MoreButton selectedGame={selectedGame} />
+						</>
+					)}
+				</SelectedGameGuard>
+			)}
+			{isLibraries && (
+				<>
+					<Box sx={{ display: cardsBatchMode ? "none" : "flex", alignItems: "center", gap: 0.5 }}>
+						<LaunchModal compact />
+						<ToolbarIconAction label={t("components.AddModal.addGame", "添加游戏")} onClick={() => openAddModal("")}>
+							<AddIcon />
+						</ToolbarIconAction>
+						<FilterSortModal />
+					</Box>
+					<Box id="cards-batch-toolbar-slot" className="flex items-center" />
+				</>
+			)}
+			{isCollection && (
+				<>
+					<Box sx={{ display: cardsBatchMode ? "none" : "flex", alignItems: "center", gap: 0.5 }}>
+						<CollectionToolbar />
+					</Box>
+					<Box id="cards-batch-toolbar-slot" className="flex items-center" />
+				</>
+			)}
+		</>
+	);
+};
+
+/**
+ * 主工具栏组件，根据路由自动切换按钮组
+ * @returns {JSX.Element}
+ */
+export const Toolbars = () => {
+	const path = useLocation().pathname;
+	const isLibraries = path === "/libraries";
+	const isDetail = path.startsWith("/libraries/") && path !== "/libraries/";
+	const isCollection = path === "/collection";
+	const isApplications = path === "/applications";
+
+	return (
+		<Stack direction="row" spacing={0.5} alignItems="center">
+			{isApplications ? <ApplicationsToolbar /> : <Buttongroup
+				isLibraries={isLibraries}
+				isDetail={isDetail}
+				isCollection={isCollection}
+			/>}
+		</Stack>
+	);
+};

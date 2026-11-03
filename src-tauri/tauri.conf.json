@@ -1,0 +1,76 @@
+{
+	"$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+	"productName": "ReinaManager",
+	"version": "../package.json",
+	"identifier": "com.reinamanager.localtest",
+	"build": {
+		"frontendDist": "../dist",
+		"devUrl": "http://localhost:5173",
+		"beforeDevCommand": "pnpm dev",
+		"beforeBuildCommand": "pnpm build"
+	},
+	"app": {
+		"withGlobalTauri": true,
+		"windows": [
+			{
+				"title": "ReinaManager Ciallo～(∠・ω< )⌒★",
+				"width": 1200,
+				"height": 720,
+				"minWidth": 1024,
+				"minHeight": 640,
+				"resizable": true,
+				"fullscreen": false,
+				"dragDropEnabled": true,
+				"visible": false
+			}
+		],
+		"security": {
+			"csp": null,
+			"assetProtocol": {
+				"enable": true,
+				"scope": [
+					"**"
+				]
+			}
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"resources": {
+			"../LICENSE": "LICENSE",
+			"../NOTICE.md": "NOTICE.md",
+			"target/7zip/": "tools/7zip"
+		},
+		"licenseFile": "../LICENSE",
+		"createUpdaterArtifacts": true,
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico"
+		],
+		"windows": {
+			"nsis": {
+				"installerIcon": "icons/icon.ico",
+				"languages": [
+					"English",
+					"SimpChinese",
+					"TradChinese",
+					"Japanese"
+				],
+				"displayLanguageSelector": true
+			}
+		}
+	},
+	"plugins": {
+		"deep-link": {
+			"desktop": {
+				"schemes": [
+					"reinamanager-test"
+				]
+			}
+		}
+	}
+}

@@ -1,0 +1,825 @@
+//! 游戏数据仓库（单表架构）
+//!
+//! 重构后的 Repository，games 表包含所有元数据（以 JSON 列存储）。
+//! 移除了多表事务代码，简化为单表 CRUD 操作。
+
+use crate::database::dto::{
+    BatchOperationError, BatchOperationResult, InsertGameData, UpdateGameData,
+};
+use crate::entity::prelude::*;
+use crate::entity::{games, savedata};
+use sea_orm::*;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+
+/// 批量扫描去重所需的最小本地路径信息。
+///
+/// 不向扫描流程暴露游戏其它元数据；调用方只可据此排除已保存的本地目录。
+#[derive(Debug, Clone)]
+pub struct ScanKnownGamePath {
+    pub localpath: Option<String>,
+    pub fallback_localpath: Option<String>,
+    pub steam_monitor_path: Option<String>,
+    pub is_steam: bool,
+}
+
+/// 游戏数据排序选项
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortOption {
+    Addtime,
+    Datetime,
+    LastPlayed,
+    BGMRank,
+    VNDBRank,
+    Namesort,
+}
+
+/// 排序方向
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SortOrder {
+    Asc,
+    Desc,
+}
+
+/// 游戏类型筛选
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GameType {
+    All,
+    Local,
+    Online,
+    IsCustom,
+}
+
+/// 游戏数据仓库（单表架构）
+pub struct GamesRepository;
+
+impl GamesRepository {
+    // ==================== 游戏 CRUD 操作 ====================
+
+    /// 缺省游戏状态：想玩 / WISH
+    const DEFAULT_PLAY_STATUS: i32 = 1;
+
+    fn normalize_steam_launch_id(value: &str) -> Result<String, DbErr> {
+        let value = value.trim();
+        let id = value
+            .parse::<u64>()
+            .map_err(|_| DbErr::Custom("Steam 启动 ID 必须是有效的正整数".to_string()))?;
+        if id == 0 {
+            return Err(DbErr::Custom("Steam 启动 ID 必须大于 0".to_string()));
+        }
+        Ok(id.to_string())
+    }
+
+    fn validate_launch_state(
+        launch_type: &str,
+        steam_launch_id: Option<&str>,
+        steam_monitor_path: Option<&str>,
+    ) -> Result<(), DbErr> {
+        match launch_type {
+            "local" => {
+                if steam_launch_id.is_some() || steam_monitor_path.is_some() {
+                    return Err(DbErr::Custom("本地启动不能保留 Steam 关联信息".to_string()));
+                }
+            }
+            "steam" => {
+                if steam_launch_id.is_none() || steam_monitor_path.is_none() {
+                    return Err(DbErr::Custom(
+                        "Steam 启动必须同时提供启动 ID 和监控目录".to_string(),
+                    ));
+                }
+            }
+            _ => {
+                return Err(DbErr::Custom("启动方式只能是 local 或 steam".to_string()));
+            }
+        }
+        Ok(())
+    }
+
+    fn normalize_insert_launch_state(game: &mut InsertGameData) -> Result<(), DbErr> {
+        if game.launch_type == "local" {
+            game.steam_launch_id = None;
+            game.steam_monitor_path = None;
+        } else if let Some(steam_launch_id) = game.steam_launch_id.as_mut() {
+            *steam_launch_id = Self::normalize_steam_launch_id(steam_launch_id)?;
+        }
+        Self::validate_launch_state(
+            &game.launch_type,
+            game.steam_launch_id.as_deref(),
+            game.steam_monitor_path.as_deref(),
+        )
+    }
+
+    async fn normalize_update_launch_state<C>(
+        connection: &C,
+        game_id: i32,
+        updates: &mut UpdateGameData,
+    ) -> Result<(), DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        if updates.launch_type.is_none()
+            && updates.steam_launch_id.is_none()
+            && updates.steam_monitor_path.is_none()
+        {
+            return Ok(());
+        }
+
+        if updates.launch_type.as_deref() == Some("local") {
+            updates.steam_launch_id = Some(None);
+            updates.steam_monitor_path = Some(None);
+        } else if let Some(Some(steam_launch_id)) = updates.steam_launch_id.as_mut() {
+            *steam_launch_id = Self::normalize_steam_launch_id(steam_launch_id)?;
+        }
+
+        let current = Games::find_by_id(game_id)
+            .one(connection)
+            .await?
+            .ok_or_else(|| DbErr::RecordNotFound(format!("游戏不存在: {game_id}")))?;
+        let launch_type = updates
+            .launch_type
+            .as_deref()
+            .unwrap_or(&current.launch_type);
+        let steam_launch_id = updates
+            .steam_launch_id
+            .as_ref()
+            .map(|value| value.as_deref())
+            .unwrap_or(current.steam_launch_id.as_deref());
+        let steam_monitor_path = updates
+            .steam_monitor_path
+            .as_ref()
+            .map(|value| value.as_deref())
+            .unwrap_or(current.steam_monitor_path.as_deref());
+        Self::validate_launch_state(launch_type, steam_launch_id, steam_monitor_path)
+    }
+
+    fn build_insert_active_model(game: InsertGameData, now: i32) -> games::ActiveModel {
+        games::ActiveModel {
+            id: NotSet,
+            bgm_id: Set(game.bgm_id),
+            vndb_id: Set(game.vndb_id),
+            ymgal_id: Set(game.ymgal_id),
+            kun_id: Set(game.kun_id),
+            dlsite_id: Set(game.dlsite_id),
+            id_type: Set(game.id_type),
+            date: Set(game.date),
+            localpath: Set(game.localpath),
+            launch_type: Set(game.launch_type),
+            steam_launch_id: Set(game.steam_launch_id),
+            steam_monitor_path: Set(game.steam_monitor_path),
+            savepath: NotSet,
+            autosave: NotSet,
+            maxbackups: NotSet,
+            clear: Set(Some(game.clear.unwrap_or(Self::DEFAULT_PLAY_STATUS))),
+            le_launch: NotSet,
+            magpie: NotSet,
+            vndb_data: Set(game.vndb_data),
+            bgm_data: Set(game.bgm_data),
+            ymgal_data: Set(game.ymgal_data),
+            kun_data: Set(game.kun_data),
+            dlsite_data: Set(game.dlsite_data),
+            custom_data: Set(game.custom_data),
+            created_at: Set(Some(now)),
+            updated_at: Set(Some(now)),
+        }
+    }
+
+    /// 插入游戏数据（单表操作）
+    ///
+    /// 所有元数据通过 JSON 列直接存储，无需多表事务
+    pub async fn insert(
+        db: &DatabaseConnection,
+        game: InsertGameData,
+    ) -> Result<games::Model, DbErr> {
+        let mut game = game.cleaned(); // 清洗空字符串为 NULL
+        Self::normalize_insert_launch_state(&mut game)?;
+
+        let now = chrono::Utc::now().timestamp() as i32;
+
+        let game_active = Self::build_insert_active_model(game, now);
+
+        game_active.insert(db).await
+    }
+
+    pub async fn insert_batch(
+        db: &DatabaseConnection,
+        games: Vec<InsertGameData>,
+    ) -> BatchOperationResult {
+        let total = games.len();
+        let now = chrono::Utc::now().timestamp() as i32;
+        let mut ids = Vec::with_capacity(total);
+        let mut inserted_games = Vec::with_capacity(total);
+        let mut errors = Vec::new();
+
+        for (index, game) in games.into_iter().enumerate() {
+            let mut game = game.cleaned();
+            if let Err(error) = Self::normalize_insert_launch_state(&mut game) {
+                errors.push(BatchOperationError {
+                    index,
+                    message: error.to_string(),
+                });
+                continue;
+            }
+            let game_active = Self::build_insert_active_model(game, now);
+
+            match game_active.insert(db).await {
+                Ok(result) => {
+                    ids.push(result.id);
+                    inserted_games.push(result);
+                }
+                Err(error) => errors.push(BatchOperationError {
+                    index,
+                    message: error.to_string(),
+                }),
+            }
+        }
+
+        BatchOperationResult {
+            total,
+            success: ids.len(),
+            failed: errors.len(),
+            ids,
+            games: inserted_games,
+            errors,
+        }
+    }
+
+    /// 更新游戏数据（单表操作）
+    ///
+    /// 支持部分更新，未提供的字段保持不变
+    pub async fn update(
+        db: &DatabaseConnection,
+        game_id: i32,
+        updates: UpdateGameData,
+    ) -> Result<games::Model, DbErr> {
+        let mut updates = updates.cleaned(); // 清洗空字符串为 NULL
+        Self::normalize_update_launch_state(db, game_id, &mut updates).await?;
+        let now = chrono::Utc::now().timestamp() as i32;
+
+        let game_active = games::ActiveModel {
+            id: Set(game_id),
+            bgm_id: updates.bgm_id.map_or(NotSet, Set),
+            vndb_id: updates.vndb_id.map_or(NotSet, Set),
+            ymgal_id: updates.ymgal_id.map_or(NotSet, Set),
+            kun_id: updates.kun_id.map_or(NotSet, Set),
+            dlsite_id: updates.dlsite_id.map_or(NotSet, Set),
+            id_type: updates.id_type.map_or(NotSet, Set),
+            date: updates.date.map_or(NotSet, Set),
+            localpath: updates.localpath.map_or(NotSet, Set),
+            launch_type: updates.launch_type.map_or(NotSet, Set),
+            steam_launch_id: updates.steam_launch_id.map_or(NotSet, Set),
+            steam_monitor_path: updates.steam_monitor_path.map_or(NotSet, Set),
+            savepath: updates.savepath.map_or(NotSet, Set),
+            autosave: updates.autosave.map_or(NotSet, Set),
+            maxbackups: updates.maxbackups.map_or(NotSet, Set),
+            clear: updates.clear.map_or(NotSet, Set),
+            le_launch: updates.le_launch.map_or(NotSet, Set),
+            magpie: updates.magpie.map_or(NotSet, Set),
+            vndb_data: updates.vndb_data.map_or(NotSet, Set),
+            bgm_data: updates.bgm_data.map_or(NotSet, Set),
+            ymgal_data: updates.ymgal_data.map_or(NotSet, Set),
+            kun_data: updates.kun_data.map_or(NotSet, Set),
+            dlsite_data: updates.dlsite_data.map_or(NotSet, Set),
+            custom_data: updates.custom_data.map_or(NotSet, Set),
+            updated_at: Set(Some(now)),
+            ..Default::default()
+        };
+
+        game_active.update(db).await
+    }
+
+    /// 批量更新游戏数据
+    ///
+    /// 在事务中批量更新，保证原子性
+    pub async fn update_batch(
+        db: &DatabaseConnection,
+        updates: Vec<(i32, UpdateGameData)>,
+    ) -> Result<Vec<games::Model>, DbErr> {
+        if updates.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let txn = db.begin().await?;
+        let now = chrono::Utc::now().timestamp() as i32;
+        let mut updated_games = Vec::with_capacity(updates.len());
+
+        for (game_id, update) in updates {
+            let mut update = update.cleaned(); // 清洗空字符串为 NULL
+            Self::normalize_update_launch_state(&txn, game_id, &mut update).await?;
+
+            let game_active = games::ActiveModel {
+                id: Set(game_id),
+                bgm_id: update.bgm_id.map_or(NotSet, Set),
+                vndb_id: update.vndb_id.map_or(NotSet, Set),
+                ymgal_id: update.ymgal_id.map_or(NotSet, Set),
+                kun_id: update.kun_id.map_or(NotSet, Set),
+                dlsite_id: update.dlsite_id.map_or(NotSet, Set),
+                id_type: update.id_type.map_or(NotSet, Set),
+                date: update.date.map_or(NotSet, Set),
+                localpath: update.localpath.map_or(NotSet, Set),
+                launch_type: update.launch_type.map_or(NotSet, Set),
+                steam_launch_id: update.steam_launch_id.map_or(NotSet, Set),
+                steam_monitor_path: update.steam_monitor_path.map_or(NotSet, Set),
+                savepath: update.savepath.map_or(NotSet, Set),
+                autosave: update.autosave.map_or(NotSet, Set),
+                maxbackups: update.maxbackups.map_or(NotSet, Set),
+                clear: update.clear.map_or(NotSet, Set),
+                le_launch: update.le_launch.map_or(NotSet, Set),
+                magpie: update.magpie.map_or(NotSet, Set),
+                bgm_data: update.bgm_data.map_or(NotSet, Set),
+                vndb_data: update.vndb_data.map_or(NotSet, Set),
+                ymgal_data: update.ymgal_data.map_or(NotSet, Set),
+                kun_data: update.kun_data.map_or(NotSet, Set),
+                dlsite_data: update.dlsite_data.map_or(NotSet, Set),
+                custom_data: update.custom_data.map_or(NotSet, Set),
+                updated_at: Set(Some(now)),
+                ..Default::default()
+            };
+
+            let result = game_active.update(&txn).await?;
+            updated_games.push(result);
+        }
+
+        txn.commit().await?;
+        Ok(updated_games)
+    }
+
+    // ==================== 查询操作 ====================
+
+    /// 根据 ID 查询游戏
+    pub async fn find_by_id(
+        db: &DatabaseConnection,
+        id: i32,
+    ) -> Result<Option<games::Model>, DbErr> {
+        Games::find_by_id(id).one(db).await
+    }
+
+    /// 获取所有游戏，支持按类型筛选和排序
+    pub async fn find_all(
+        db: &DatabaseConnection,
+        game_type: GameType,
+        sort_option: SortOption,
+        sort_order: SortOrder,
+        language: Option<String>,
+    ) -> Result<Vec<games::Model>, DbErr> {
+        Self::find_with_sort(db, game_type, sort_option, sort_order, language).await
+    }
+
+    /// 只返回排序后的 ID 列表，不返回完整游戏数据
+    ///
+    /// 对 SQL 层可直接排序的选项（Addtime/Datetime/LastPlayed）
+    /// 走 `SELECT id` 优化路径，避免加载 JSON 元数据列。
+    /// 其余选项（BGMRank/VNDBRank/Namesort）复用 find_with_sort 再提取 id。
+    /// 前端已缓存完整数据，切换排序/筛选时只需传输 ID 数组。
+    pub async fn find_ids(
+        db: &DatabaseConnection,
+        game_type: GameType,
+        sort_option: SortOption,
+        sort_order: SortOrder,
+        language: Option<String>,
+    ) -> Result<Vec<i32>, DbErr> {
+        match sort_option {
+            SortOption::Addtime | SortOption::Datetime | SortOption::LastPlayed => {
+                Self::find_ids_sql(db, game_type, sort_option, sort_order).await
+            }
+            _ => {
+                let games =
+                    Self::find_with_sort(db, game_type, sort_option, sort_order, language).await?;
+                Ok(games.into_iter().map(|g| g.id).collect())
+            }
+        }
+    }
+
+    /// 删除游戏
+    pub async fn delete(db: &DatabaseConnection, id: i32) -> Result<DeleteResult, DbErr> {
+        Games::delete_by_id(id).exec(db).await
+    }
+
+    /// 批量删除游戏
+    pub async fn delete_many(
+        db: &DatabaseConnection,
+        ids: Vec<i32>,
+    ) -> Result<DeleteResult, DbErr> {
+        Games::delete_many()
+            .filter(games::Column::Id.is_in(ids))
+            .exec(db)
+            .await
+    }
+
+    /// 获取游戏总数
+    pub async fn count(db: &DatabaseConnection) -> Result<u64, DbErr> {
+        Games::find().count(db).await
+    }
+
+    /// 获取所有游戏的 BGM ID
+    pub async fn get_all_bgm_ids(db: &DatabaseConnection) -> Result<Vec<(i32, String)>, DbErr> {
+        Games::find()
+            .filter(games::Column::BgmId.is_not_null())
+            .all(db)
+            .await
+            .map(|games| {
+                games
+                    .into_iter()
+                    .filter_map(|g| g.bgm_id.map(|bgm_id| (g.id, bgm_id)))
+                    .collect()
+            })
+    }
+
+    /// 获取所有游戏的 VNDB ID
+    pub async fn get_all_vndb_ids(db: &DatabaseConnection) -> Result<Vec<(i32, String)>, DbErr> {
+        Games::find()
+            .filter(games::Column::VndbId.is_not_null())
+            .all(db)
+            .await
+            .map(|games| {
+                games
+                    .into_iter()
+                    .filter_map(|g| g.vndb_id.map(|vndb_id| (g.id, vndb_id)))
+                    .collect()
+            })
+    }
+
+    /// 检查 BGM ID 是否已存在
+    pub async fn exists_bgm_id(db: &DatabaseConnection, bgm_id: &str) -> Result<bool, DbErr> {
+        Ok(Games::find()
+            .filter(games::Column::BgmId.eq(bgm_id))
+            .count(db)
+            .await?
+            > 0)
+    }
+
+    /// 检查 VNDB ID 是否已存在
+    pub async fn exists_vndb_id(db: &DatabaseConnection, vndb_id: &str) -> Result<bool, DbErr> {
+        Ok(Games::find()
+            .filter(games::Column::VndbId.eq(vndb_id))
+            .count(db)
+            .await?
+            > 0)
+    }
+
+    /// 获取所有非空本地路径，用于扫描去重
+    ///
+    /// 返回数据库中所有 `localpath` 字段的集合（仅非 NULL 值），
+    /// 使用 `HashSet` 以便调用方做 O(1) 精确匹配；前缀检查由调用方负责。
+    pub async fn get_all_localpaths(db: &DatabaseConnection) -> Result<HashSet<String>, DbErr> {
+        Games::find()
+            .filter(games::Column::Localpath.is_not_null())
+            .all(db)
+            .await
+            .map(|rows| rows.into_iter().filter_map(|g| g.localpath).collect())
+    }
+
+    /// 获取批量目录扫描的去重路径。
+    ///
+    /// 每个游戏只贡献一条普通本地路径：优先 `localpath`，为空时才取最后一条备用路径。
+    /// Steam 游戏在此基础上另贡献监控目录，防止本地安装目录被重复发现。
+    pub async fn get_known_paths_for_directory_scan(
+        db: &DatabaseConnection,
+    ) -> Result<Vec<ScanKnownGamePath>, DbErr> {
+        Games::find().all(db).await.map(|rows| {
+            rows.into_iter()
+                .map(|game| {
+                    let fallback_localpath = game
+                        .custom_data
+                        .as_ref()
+                        .and_then(|custom_data| custom_data.extra_local_paths.as_ref())
+                        .and_then(|paths| paths.iter().rev().find(|path| !path.trim().is_empty()))
+                        .cloned();
+                    let is_steam = game.launch_type.eq_ignore_ascii_case("steam");
+                    ScanKnownGamePath {
+                        localpath: game.localpath.filter(|path| !path.trim().is_empty()),
+                        fallback_localpath,
+                        steam_monitor_path: is_steam
+                            .then_some(game.steam_monitor_path)
+                            .flatten()
+                            .filter(|path| !path.trim().is_empty()),
+                        is_steam,
+                    }
+                })
+                .collect()
+        })
+    }
+
+    /// 获取已保存的 Steam 启动 ID，供扫描与导入去重使用。
+    pub async fn get_all_steam_launch_ids(
+        db: &DatabaseConnection,
+    ) -> Result<HashSet<String>, DbErr> {
+        Games::find()
+            .select_only()
+            .column(games::Column::SteamLaunchId)
+            .filter(games::Column::SteamLaunchId.is_not_null())
+            .into_tuple::<String>()
+            .all(db)
+            .await
+            .map(|ids| ids.into_iter().collect())
+    }
+
+    // ==================== 私有方法 ====================
+
+    /// 通用的查询构建器：应用类型筛选
+    fn build_base_query(game_type: GameType) -> Select<Games> {
+        let mut query = Games::find();
+
+        query = match game_type {
+            GameType::All => query,
+            GameType::Local => query.filter(
+                Condition::any()
+                    .add(games::Column::Localpath.is_not_null())
+                    .add(games::Column::LaunchType.eq("steam")),
+            ),
+            GameType::Online => query.filter(
+                Condition::all()
+                    .add(games::Column::Localpath.is_null())
+                    .add(games::Column::LaunchType.eq("local")),
+            ),
+            GameType::IsCustom => query.filter(
+                Condition::any()
+                    .add(games::Column::IdType.eq("custom"))
+                    .add(games::Column::IdType.eq("Whitecloud")),
+            ),
+        };
+        query
+    }
+
+    /// 应用层排序：按可选数值键排序，None 值统一置末尾
+    ///
+    /// - `key_fn`：从游戏记录提取排序键，返回 `Option<K>`
+    /// - `desc`：true 时降序（大值靠前），false 时升序（小值靠前）
+    fn sort_by_optional_key<K, F>(games: &mut [games::Model], desc: bool, key_fn: F)
+    where
+        K: PartialOrd,
+        F: Fn(&games::Model) -> Option<K>,
+    {
+        games.sort_by(|a, b| match (key_fn(a), key_fn(b)) {
+            (None, None) => std::cmp::Ordering::Equal,
+            (None, _) => std::cmp::Ordering::Greater,
+            (_, None) => std::cmp::Ordering::Less,
+            (Some(ka), Some(kb)) => {
+                let ord = ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal);
+                if desc { ord.reverse() } else { ord }
+            }
+        });
+    }
+    /// 从游戏记录中提取用于排序的显示名称
+    ///
+    /// 优先级与前端 `getGameDisplayName` 保持一致：
+    /// `custom_data.name` > `name_cn`（仅 zh-CN）> 按 `id_type` 取 `name`
+    ///
+    /// 返回值为排序键字符串：zh-CN 时汉字转拼音，其他情况转小写
+    fn get_sort_name(game: &games::Model, use_cn: bool) -> Option<String> {
+        // 1. 自定义名称最高优先 (使用 as_deref 转为 &str)
+        if let Some(name) = game
+            .custom_data
+            .as_ref()
+            .and_then(|d| d.name.as_deref())
+            .filter(|n| !n.is_empty())
+        {
+            return Some(Self::to_sort_key(name, use_cn));
+        }
+
+        // 定义局部宏：处理不同数据源的提取与 fallback 逻辑。
+        // 全程使用 &str 操作，做到 Zero-cost (零成本抽象)
+        macro_rules! extract_name {
+            ($source:expr) => {
+                $source.as_ref().and_then(|d| {
+                    let cn = d.name_cn.as_deref().filter(|n| !n.is_empty());
+                    let en = d.name.as_deref().filter(|n| !n.is_empty());
+
+                    // 根据 use_cn 决定优先级链
+                    if use_cn { cn.or(en) } else { en }
+                })
+            };
+        }
+
+        macro_rules! kun_extract_name {
+            ($source:expr) => {
+                $source.as_ref().and_then(|d| {
+                    let cn = d.name_cn.as_deref().filter(|n| !n.is_empty());
+                    let en = d.name.as_deref().filter(|n| !n.is_empty());
+                    if use_cn { cn.or(en) } else { en }
+                })
+            };
+        }
+
+        // 2. 根据 id_type 获取最终名称的引用 (&str)
+        let name_ref = match game.id_type.as_str() {
+            "bgm" => extract_name!(game.bgm_data),
+            "vndb" => extract_name!(game.vndb_data),
+            "ymgal" => extract_name!(game.ymgal_data),
+            "kun" => kun_extract_name!(game.kun_data),
+            // mixed 和其他类型：依次降级尝试
+            _ => extract_name!(game.bgm_data)
+                .or_else(|| extract_name!(game.vndb_data))
+                .or_else(|| extract_name!(game.ymgal_data))
+                .or_else(|| kun_extract_name!(game.kun_data)),
+        };
+
+        // 3. 统一在这里进行内存分配，根据语言转换为合适的排序键
+        name_ref.map(|n| Self::to_sort_key(n, use_cn))
+    }
+
+    /// 将名称转换为排序键
+    ///
+    /// - zh-CN：汉字转拼音（无声调），非汉字字符保留并转小写，实现按拼音字母序排列
+    /// - 其他语言：直接转小写
+    fn to_sort_key(s: &str, use_cn: bool) -> String {
+        if !use_cn {
+            return s.to_lowercase();
+        }
+
+        use pinyin::ToPinyin;
+        let mut result = String::with_capacity(s.len() * 2);
+        for (c, py) in s.chars().zip(s.to_pinyin()) {
+            match py {
+                Some(p) => result.push_str(p.plain()),
+                None => {
+                    for lc in c.to_lowercase() {
+                        result.push(lc);
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// 使用 SeaORM 的 `SELECT id` 优化路径，仅查询游戏 ID 列
+    ///
+    /// 仅适用于 SQL 层可直接排序的选项（Addtime/Datetime/LastPlayed），
+    /// 避免加载 5 个 JSON 元数据列（bgm_data/vndb_data/ymgal_data/kun_data/custom_data）。
+    async fn find_ids_sql(
+        db: &DatabaseConnection,
+        game_type: GameType,
+        sort_option: SortOption,
+        sort_order: SortOrder,
+    ) -> Result<Vec<i32>, DbErr> {
+        match sort_option {
+            SortOption::Addtime => {
+                let mut query = Self::build_base_query(game_type)
+                    .select_only()
+                    .column(games::Column::Id);
+                query = match sort_order {
+                    SortOrder::Asc => query.order_by_asc(games::Column::Id),
+                    SortOrder::Desc => query.order_by_desc(games::Column::Id),
+                };
+                query.into_tuple::<i32>().all(db).await
+            }
+            SortOption::Datetime => {
+                let mut query = Self::build_base_query(game_type)
+                    .select_only()
+                    .column(games::Column::Id);
+                query = match sort_order {
+                    SortOrder::Asc => query.order_by_asc(games::Column::Date),
+                    SortOrder::Desc => query.order_by_desc(games::Column::Date),
+                };
+                query.into_tuple::<i32>().all(db).await
+            }
+            SortOption::LastPlayed => {
+                use crate::entity::game_statistics;
+                Self::build_base_query(game_type)
+                    .select_only()
+                    .column(games::Column::Id)
+                    .left_join(game_statistics::Entity)
+                    .order_by(game_statistics::Column::LastPlayed, Order::Desc)
+                    .order_by_asc(games::Column::Id)
+                    .into_tuple::<i32>()
+                    .all(db)
+                    .await
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// 通用的排序和查询方法
+    async fn find_with_sort(
+        db: &DatabaseConnection,
+        game_type: GameType,
+        sort_option: SortOption,
+        sort_order: SortOrder,
+        language: Option<String>,
+    ) -> Result<Vec<games::Model>, DbErr> {
+        use crate::entity::game_statistics;
+
+        match sort_option {
+            SortOption::Addtime => {
+                let mut query = Self::build_base_query(game_type);
+                query = match sort_order {
+                    SortOrder::Asc => query.order_by_asc(games::Column::Id),
+                    SortOrder::Desc => query.order_by_desc(games::Column::Id),
+                };
+                query.all(db).await
+            }
+            SortOption::Datetime => {
+                let mut query = Self::build_base_query(game_type);
+                query = match sort_order {
+                    SortOrder::Asc => query.order_by_asc(games::Column::Date),
+                    SortOrder::Desc => query.order_by_desc(games::Column::Date),
+                };
+                query.all(db).await
+            }
+            SortOption::LastPlayed => {
+                let query = Self::build_base_query(game_type).left_join(game_statistics::Entity);
+                query
+                    .order_by(game_statistics::Column::LastPlayed, Order::Desc)
+                    .order_by_asc(games::Column::Id)
+                    .all(db)
+                    .await
+            }
+            SortOption::BGMRank => {
+                // bgm_data.rank：数值越小排名越靠前，无 rank 或 rank=0 置末尾
+                let mut games = Self::build_base_query(game_type).all(db).await?;
+                let desc = matches!(sort_order, SortOrder::Desc);
+                Self::sort_by_optional_key(&mut games, desc, |g| {
+                    g.bgm_data.as_ref().and_then(|d| d.rank).filter(|&r| r != 0)
+                });
+                Ok(games)
+            }
+            SortOption::VNDBRank => {
+                // vndb_data.score：数值越大越靠前，无 score 或 score=0 置末尾
+                let mut games = Self::build_base_query(game_type).all(db).await?;
+                let desc = matches!(sort_order, SortOrder::Asc);
+                Self::sort_by_optional_key(&mut games, desc, |g| {
+                    g.vndb_data
+                        .as_ref()
+                        .and_then(|d| d.score)
+                        .filter(|&s| s != 0.0)
+                });
+                Ok(games)
+            }
+            SortOption::Namesort => {
+                // 名称排序：应用层排序，名称来自 JSON 列
+                // 名称选择优先级与前端 getGameDisplayName 一致
+                let mut games = Self::build_base_query(game_type).all(db).await?;
+                let desc = matches!(sort_order, SortOrder::Desc);
+                let use_cn = language.as_deref().map(|l| l == "zh-CN").unwrap_or(false);
+                Self::sort_by_optional_key(&mut games, desc, |g| Self::get_sort_name(g, use_cn));
+                Ok(games)
+            }
+        }
+    }
+
+    // ==================== 存档备份相关操作 ====================
+
+    /// 保存存档备份记录
+    pub async fn save_savedata_record(
+        db: &DatabaseConnection,
+        game_id: i32,
+        file_name: &str,
+        backup_time: i64,
+        file_size: i64,
+    ) -> Result<i32, DbErr> {
+        let savedata_record = savedata::ActiveModel {
+            id: NotSet,
+            game_id: Set(game_id),
+            file: Set(file_name.to_string()),
+            backup_time: Set(backup_time),
+            file_size: Set(file_size),
+        };
+        let result = savedata_record.insert(db).await?;
+        Ok(result.id)
+    }
+
+    /// 获取指定游戏的备份数量
+    pub async fn get_savedata_count(db: &DatabaseConnection, game_id: i32) -> Result<u64, DbErr> {
+        Savedata::find()
+            .filter(savedata::Column::GameId.eq(game_id))
+            .count(db)
+            .await
+    }
+
+    /// 获取指定游戏的所有备份记录（按时间倒序）
+    pub async fn get_savedata_records(
+        db: &DatabaseConnection,
+        game_id: i32,
+    ) -> Result<Vec<savedata::Model>, DbErr> {
+        Savedata::find()
+            .filter(savedata::Column::GameId.eq(game_id))
+            .order_by_desc(savedata::Column::BackupTime)
+            .all(db)
+            .await
+    }
+
+    /// 获取全部存档备份记录，仅供更换统一备份根目录前进行完整核验。
+    pub async fn get_all_savedata_records(
+        db: &DatabaseConnection,
+    ) -> Result<Vec<savedata::Model>, DbErr> {
+        Savedata::find().all(db).await
+    }
+
+    /// 根据 ID 获取备份记录
+    pub async fn get_savedata_record_by_id(
+        db: &DatabaseConnection,
+        backup_id: i32,
+    ) -> Result<Option<savedata::Model>, DbErr> {
+        Savedata::find_by_id(backup_id).one(db).await
+    }
+
+    /// 删除备份记录
+    pub async fn delete_savedata_record(
+        db: &DatabaseConnection,
+        backup_id: i32,
+    ) -> Result<DeleteResult, DbErr> {
+        Savedata::delete_by_id(backup_id).exec(db).await
+    }
+}

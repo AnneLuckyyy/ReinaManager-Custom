@@ -1,0 +1,40 @@
+# Folder to ignore
+node_modules
+dist
+target
+src-tauri/target
+.tauri
+.ai_cli
+.rust-skills
+docs-local
+others
+
+# Editor directories
+.vscode
+
+# For Zed
+.prettierignore
+
+*.local
+.env
+.env.*
+!.env.example
+
+# Local user data, credentials and generated release material must never enter a public repository.
+*.db
+*.db-*
+*.reina-settings.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.7z
+*.zip
+*.msi
+*.exe
+logs/
+backups/
+custom-covers/
+
+AGENTS.md
+src-tauri/tauri.local.conf.json

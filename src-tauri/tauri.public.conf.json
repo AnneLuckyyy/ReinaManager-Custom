@@ -1,0 +1,37 @@
+{
+	"productName": "ReinaManager Custom",
+	"version": "0.20.5-custom.1",
+	"identifier": "io.github.anneluckyyy.reinamanager-custom",
+	"mainBinaryName": "ReinaManagerCustom",
+	"app": {
+		"windows": [
+			{
+				"title": "ReinaManager Custom",
+				"width": 1200,
+				"height": 720,
+				"minWidth": 1024,
+				"minHeight": 640,
+				"resizable": true,
+				"fullscreen": false,
+				"dragDropEnabled": true,
+				"visible": false
+			}
+		]
+	},
+	"bundle": {
+		"createUpdaterArtifacts": false,
+		"publisher": "AnneLucky",
+		"copyright": "Copyright © 2025 huoshen80; modified edition © 2026 AnneLucky",
+		"homepage": "https://github.com/AnneLuckyyy/ReinaManager-Custom",
+		"category": "Game"
+	},
+	"plugins": {
+		"deep-link": {
+			"desktop": {
+				"schemes": [
+					"reinamanager-custom"
+				]
+			}
+		}
+	}
+}

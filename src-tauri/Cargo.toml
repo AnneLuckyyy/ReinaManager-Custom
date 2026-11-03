@@ -1,0 +1,112 @@
+[workspace]
+members = ["reina-path", "migration", "reina-download"]
+
+[package]
+name = "ReinaManager"
+version = "0.20.5-custom.1"
+description = "A lightweight visual novel manager"
+authors = ["huoshen80", "AnneLucky (modified edition maintainer)"]
+license = "GNU AFFERO GENERAL PUBLIC LICENSE"
+repository = "https://github.com/AnneLuckyyy/ReinaManager-Custom"
+edition = "2024"
+rust-version = "1.95"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "reina_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "~2.6.1", features = [] }
+dotenvy = "0.15"
+sevenz-rust2 = { version = "0.21.0", default-features = false, features = ["util"] }
+sha2 = "0.10.9"
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
+
+[dependencies]
+# Serialization & logging
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+dotenvy = "0.15"
+base64 = "0.22"
+png = "0.17.16"
+blake3 = "1.8.7"
+sha2 = "0.10.9"
+# Tauri core and plugins
+tauri = { version = "~2.11.1", features = ["protocol-asset", "tray-icon"] }
+tauri-plugin-autostart = "~2.5.1"
+tauri-plugin-dialog = "~2.7.0"
+tauri-plugin-deep-link = "=2.4.9"
+tauri-plugin-fs = "~2.5.0"
+tauri-plugin-http = "~2.5.8"
+tauri-plugin-log = "~2.8.0"
+tauri-plugin-shell = "~2.3.5"
+tauri-plugin-single-instance = { version = "~2.4.1", features = ["deep-link"] }
+tauri-plugin-updater = "~2.10.1"
+tauri-plugin-process = "~2.3.1"
+tauri-plugin-window-state = "=2.2.3"
+tauri-plugin-store = "~2.4.2"
+tauri-plugin-os = "~2.3.2"
+
+
+# System / utilities
+sevenz-rust2 = { version = "0.21.0", features = ["zstd"] }
+chrono = { version = "0.4.44", features = ["serde"] }
+parking_lot = "0.12"
+encoding_rs = "0.8"
+steamlocate = "2.1.1"
+nix = { version = "0.30.1", features = ["signal"] }
+
+# Async runtime / DB
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "time", "sync", "fs", "io-util"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "stream"] }
+percent-encoding = "2.3.2"
+sea-orm = { version = "1.1.20", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-native-tls",
+    "macros",
+] }
+
+# Misc
+getrandom = "0.4"
+url = "2.5.8"
+pinyin = "0.11.0"
+walkdir = "2"
+migration = { path = "migration" }
+reina-path = { path = "reina-path" }
+reina-download = { path = "reina-download" }
+
+# Windows system APIs
+[target.'cfg(target_os = "windows")'.dependencies]
+clipboard-win = { version = "5.4.1", features = ["std"] }
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+    "Win32_System_Registry",
+	"Win32_System_Com",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Graphics_Gdi",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+xcb = "1.6.0"
+zbus = "5.12.0"
+zbus_systemd = { version = "0.25800.0", features = ["systemd1"] }
+
+
+[profile.dev]
+incremental = true # 以较小的步骤编译您的二进制文件。
+split-debuginfo = "unpacked"
+
+[profile.release]
+codegen-units = 1 # 允许 LLVM 执行更好的优化。
+lto = true        # 启用链接时优化。
+opt-level = "z"   # 优先考虑小的二进制文件大小。如果您更喜欢速度，请使用 `3`。
+panic = "abort"   # 通过禁用 panic 处理程序来提高性能。
+# strip = true      # 确保移除调试符号。

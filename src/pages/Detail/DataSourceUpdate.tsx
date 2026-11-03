@@ -1,0 +1,314 @@
+import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
+import UpdateIcon from "@mui/icons-material/Update";
+import {
+	Box,
+	Button,
+	CircularProgress,
+	FormControl,
+	InputLabel,
+	MenuItem,
+	Select as MuiSelect,
+	type SelectChangeEvent,
+	TextField,
+} from "@mui/material";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { snackbar } from "@/providers/snackBar";
+import type { GameCandidateData, GameData, SourceType } from "@/types";
+import { isSourceType, SOURCE_FIELD_KEYS, SOURCE_KEYS } from "@/types";
+import { isBgmAuthExpiredError, withBgmAuth } from "@/utils/bgmAuthSession";
+import { getUserErrorMessage } from "@/utils/errors";
+import { fetchMetadataForUpdate } from "@/utils/metadata";
+
+interface DataSourceUpdateProps {
+	selectedGame: GameData;
+	sourceAvailability: Record<SourceType, boolean>;
+	onDataFetched: (data: GameCandidateData) => void;
+	onSourceSwitch: (idType: string) => Promise<void>;
+	disabled?: boolean;
+}
+
+/**
+ * DataSourceUpdate 组件
+ * 负责从外部数据源(BGM, VNDB, YMGal, Kungal, DLsite, Mixed)更新游戏信息
+ */
+export const DataSourceUpdate: React.FC<DataSourceUpdateProps> = ({
+	selectedGame,
+	sourceAvailability,
+	onDataFetched,
+	onSourceSwitch,
+	disabled = false,
+}) => {
+	const { t } = useTranslation();
+
+	// 数据源更新相关状态
+	const [bgmId, setBgmId] = useState<string>(selectedGame.bgm_id || "");
+	const [vndbId, setVndbId] = useState<string>(selectedGame.vndb_id || "");
+	const [ymgalId, setYmgalId] = useState<string>(selectedGame.ymgal_id || "");
+	const [kunId, setKunId] = useState<string>(selectedGame.kun_id || "");
+	const [dlsiteId, setDlsiteId] = useState<string>(selectedGame.dlsite_id || "");
+	const [idType, setIdType] = useState<string>(selectedGame.id_type || "");
+	const [isLoading, setIsLoading] = useState(false);
+	const [isSwitching, setIsSwitching] = useState(false);
+	const showMixedInputs = idType === "mixed";
+	const isBusy = isLoading || isSwitching || disabled;
+
+	const hasSelectedSourceData = (source: (typeof SOURCE_KEYS)[number]) => {
+		const { id } = SOURCE_FIELD_KEYS[source];
+		return Boolean(selectedGame[id] && sourceAvailability[source]);
+	};
+
+	const canSwitchSource = () => {
+		if (
+			!idType ||
+			idType === selectedGame.id_type ||
+			idType === "custom" ||
+			idType === "Whitecloud"
+		) {
+			return false;
+		}
+		if (idType === "mixed") {
+			return SOURCE_KEYS.some((source) => hasSelectedSourceData(source));
+		}
+		if (isSourceType(idType)) {
+			return hasSelectedSourceData(idType);
+		}
+		return false;
+	};
+
+	useEffect(() => {
+		setBgmId(selectedGame.bgm_id || "");
+		setVndbId(selectedGame.vndb_id || "");
+		setYmgalId(selectedGame.ymgal_id || "");
+		setKunId(selectedGame.kun_id || "");
+		setDlsiteId(selectedGame.dlsite_id || "");
+		setIdType(selectedGame.id_type || "");
+	}, [
+		selectedGame.bgm_id,
+		selectedGame.vndb_id,
+		selectedGame.ymgal_id,
+		selectedGame.kun_id,
+		selectedGame.dlsite_id,
+		selectedGame.id_type,
+	]);
+
+	// 获取并预览游戏数据
+	const handleFetchAndPreview = async () => {
+		if (idType === "custom") {
+			snackbar.error(
+				t(
+					"pages.Detail.DataSourceUpdate.customModeWarning",
+					"自定义模式无法从数据源更新。",
+				),
+			);
+			return;
+		}
+
+		try {
+			setIsLoading(true);
+			const shouldUseBgmToken =
+				idType === "bgm" || (idType === "mixed" && bgmId);
+			const result = await withBgmAuth(
+				(token) =>
+					fetchMetadataForUpdate({
+						selectedGame,
+						idType,
+						bgmId,
+						vndbId,
+						ymgalId,
+					kunId,
+					dlsiteId,
+						bgmToken: shouldUseBgmToken ? (token ?? undefined) : undefined,
+					}),
+				{ required: idType === "bgm" },
+			);
+			onDataFetched(result);
+		} catch (error) {
+			if (isBgmAuthExpiredError(error)) {
+				return;
+			}
+			snackbar.error(getUserErrorMessage(error, t));
+		} finally {
+			setIsLoading(false);
+		}
+	};
+
+	// 处理数据源选择变更
+	const handleIdTypeChange = (event: SelectChangeEvent) => {
+		setIdType(event.target.value);
+	};
+
+	const handleSwitchSource = async () => {
+		if (!canSwitchSource()) {
+			snackbar.error(
+				t(
+					"pages.Detail.DataSourceUpdate.sourceSwitchUnavailable",
+					"当前游戏没有该数据源的本地数据，无法仅切换显示源。",
+				),
+			);
+			return;
+		}
+
+		try {
+			setIsSwitching(true);
+			await onSourceSwitch(idType);
+		} catch (error) {
+			snackbar.error(getUserErrorMessage(error, t));
+		} finally {
+			setIsSwitching(false);
+		}
+	};
+
+	return (
+		<Box className="flex flex-col gap-5">
+			{/* ID 类型选择框 */}
+			<FormControl fullWidth disabled={isBusy}>
+				<InputLabel id="id-type-label">
+					{t("pages.Detail.DataSourceUpdate.dataSource", "数据源")}
+				</InputLabel>
+				<MuiSelect
+					labelId="id-type-label"
+					value={idType}
+					onChange={handleIdTypeChange}
+					label={t("pages.Detail.DataSourceUpdate.dataSource", "数据源")}
+				>
+					<MenuItem value="bgm">Bangumi</MenuItem>
+					<MenuItem value="vndb">VNDB</MenuItem>
+					<MenuItem value="ymgal">YMGal</MenuItem>
+					<MenuItem value="kun">Kungal</MenuItem>
+					<MenuItem value="dlsite">DLsite</MenuItem>
+					<MenuItem value="mixed">Mixed</MenuItem>
+					<MenuItem value="custom" disabled>
+						Custom
+					</MenuItem>
+					<MenuItem value="Whitecloud" disabled>
+						Whitecloud
+					</MenuItem>
+				</MuiSelect>
+			</FormControl>
+
+			{/* Bangumi ID 编辑框 */}
+			{(idType === "bgm" || showMixedInputs) && (
+				<TextField
+					label={t("pages.Detail.DataSourceUpdate.bgmId", "Bangumi ID")}
+					variant="outlined"
+					fullWidth
+					value={bgmId}
+					onChange={(e) => setBgmId(e.target.value)}
+					disabled={isBusy}
+					required={idType === "bgm"}
+				/>
+			)}
+
+			{/* VNDB ID 编辑框 */}
+			{(idType === "vndb" || showMixedInputs) && (
+				<TextField
+					label={t("pages.Detail.DataSourceUpdate.vndbId", "VNDB ID")}
+					variant="outlined"
+					fullWidth
+					value={vndbId}
+					onChange={(e) => setVndbId(e.target.value)}
+					disabled={isBusy}
+					required={idType === "vndb"}
+				/>
+			)}
+
+			{/* YMGal ID 编辑框 */}
+			{(idType === "ymgal" || showMixedInputs) && (
+				<TextField
+					label={t("pages.Detail.DataSourceUpdate.ymgalId", "YMGal ID")}
+					variant="outlined"
+					fullWidth
+					value={ymgalId}
+					onChange={(e) => setYmgalId(e.target.value)}
+					disabled={isBusy}
+					required={idType === "ymgal"}
+				/>
+			)}
+
+			{/* Kungal ID 编辑框 */}
+			{(idType === "kun" || showMixedInputs) && (
+				<TextField
+					label={t("pages.Detail.DataSourceUpdate.kunId", "Kungal ID")}
+					variant="outlined"
+					fullWidth
+					value={kunId}
+					onChange={(e) => setKunId(e.target.value)}
+					disabled={isBusy}
+					required={idType === "kun"}
+				/>
+			)}
+
+			{(idType === "dlsite" || showMixedInputs) && (
+				<TextField
+					label={t("pages.Detail.DataSourceUpdate.dlsiteId", "DLsite ID")}
+					variant="outlined"
+					fullWidth
+					value={dlsiteId}
+					onChange={(e) => setDlsiteId(e.target.value)}
+					disabled={isBusy}
+					required={idType === "dlsite"}
+				/>
+			)}
+
+			{/* 操作按钮 */}
+			<Box className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+				<Button
+					variant="outlined"
+					color="primary"
+					size="large"
+					fullWidth
+					disabled={!canSwitchSource() || isBusy}
+					onClick={handleSwitchSource}
+					startIcon={
+						isSwitching ? (
+							<CircularProgress size={20} color="inherit" />
+						) : (
+							<SwapHorizIcon />
+						)
+					}
+				>
+					{isSwitching
+						? t("pages.Detail.DataSourceUpdate.switchingSource", "正在切换...")
+						: t(
+								"pages.Detail.DataSourceUpdate.switchDisplaySource",
+								"切换显示源",
+							)}
+				</Button>
+
+				<Button
+					variant="contained"
+					color="primary"
+					size="large"
+					fullWidth
+					disabled={
+						idType === "custom" ||
+						isBusy ||
+						(idType === "bgm" && !bgmId) ||
+						(idType === "vndb" && !vndbId) ||
+						(idType === "ymgal" && !ymgalId) ||
+						(idType === "kun" && !kunId) ||
+						(idType === "dlsite" && !dlsiteId) ||
+						(idType === "mixed" &&
+							!(bgmId || vndbId || ymgalId || kunId || dlsiteId))
+					}
+					onClick={handleFetchAndPreview}
+					startIcon={
+						isLoading ? (
+							<CircularProgress size={20} color="inherit" />
+						) : (
+							<UpdateIcon />
+						)
+					}
+				>
+					{isLoading
+						? t("pages.Detail.DataSourceUpdate.loading", "正在获取...")
+						: t(
+								"pages.Detail.DataSourceUpdate.updateFromSource",
+								"从数据源更新数据",
+							)}
+				</Button>
+			</Box>
+		</Box>
+	);
+};

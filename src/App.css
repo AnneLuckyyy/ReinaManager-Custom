@@ -1,0 +1,6 @@
+/* 禁用弹性滚动，防止页面回弹 */
+html,
+body {
+	overscroll-behavior: none;
+	scrollbar-gutter: stable;
+}
