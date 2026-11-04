@@ -58,7 +58,25 @@
 
 ## 截图
 
-> 当前改版的实机截图将在完整验证后补充。
+### 主页
+
+![主页](screenshots/home.png)
+
+### 游戏仓库
+
+![游戏仓库](screenshots/library.png)
+
+### 收藏夹
+
+![收藏夹](screenshots/collection.png)
+
+### 应用
+
+![应用](screenshots/applications.png)
+
+### 下载任务
+
+![下载任务](screenshots/downloads.png)
 
 ## 下载
 

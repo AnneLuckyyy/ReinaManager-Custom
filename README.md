@@ -58,7 +58,25 @@ The following core capabilities come from the original ReinaManager 0.20.4:
 
 ## Screenshots
 
-> Screenshots of this edition will be added after the current build is fully verified.
+### Home
+
+![Home](screenshots/home.png)
+
+### Game Library
+
+![Game Library](screenshots/library.png)
+
+### Collections
+
+![Collections](screenshots/collection.png)
+
+### Applications
+
+![Applications](screenshots/applications.png)
+
+### Download Tasks
+
+![Download Tasks](screenshots/downloads.png)
 
 ## Download
 
