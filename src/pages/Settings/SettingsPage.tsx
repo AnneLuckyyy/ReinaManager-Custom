@@ -361,8 +361,8 @@ export const Settings: React.FC = () => {
 						label: t("pages.Settings.pathSettings.title", "路径设置"),
 						keywords: "路径 操作目录 存档 le magpie 数据库 备份 工具 压缩包 连接 folder path workspace tool archive",
 						content: (
-							<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1.5}>
-								<Stack direction="row" alignItems="center" sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+							<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1}>
+								<Stack direction="row" alignItems="center">
 									<Typography variant="subtitle1" className="font-semibold">
 										{t("pages.Settings.pathSettings.title", "路径设置")}
 									</Typography>
@@ -384,8 +384,8 @@ export const Settings: React.FC = () => {
 						label: "目录关联",
 						keywords: "目录 关联 游戏 批量 导入 扫描 根目录 收藏夹 分类 应用 来源 快捷方式",
 						content: (
-							<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1.5}>
-								<Stack direction="row" alignItems="center" sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+							<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1}>
+								<Stack direction="row" alignItems="center">
 									<Typography variant="subtitle1" className="font-semibold">目录关联</Typography>
 									<AdvancedSettingsHelp
 										tooltip="集中管理扫描根目录与分类来源目录；只在需要时读取。"

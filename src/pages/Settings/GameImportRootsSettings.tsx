@@ -22,8 +22,8 @@ export function GameImportRootsSettings() {
 
 	return (
 		<Stack spacing={1.25}>
-			<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1.5}>
-				<Stack direction="row" alignItems="center" sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+			<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1}>
+				<Stack direction="row" alignItems="center">
 					<Typography variant="subtitle1" className="font-semibold">游戏批量导入</Typography>
 					<SettingsHelp text="未手动选择根文件夹时，批量导入会依次扫描这里的目录；手动选择后只扫描该次选中的目录。目录仅在打开批量导入时读取，不会持续监听。" />
 				</Stack>

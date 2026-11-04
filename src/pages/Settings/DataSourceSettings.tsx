@@ -70,6 +70,8 @@ export const MixedSearchSourceSettings = () => {
 					alignItems="center"
 				>
 					<FormControlLabel
+						labelPlacement="start"
+						sx={{ gap: 0.75, ml: 0 }}
 						control={
 							<Checkbox
 								checked={mixedEnableYmgal}
@@ -80,6 +82,8 @@ export const MixedSearchSourceSettings = () => {
 						label="YMGal"
 					/>
 					<FormControlLabel
+						labelPlacement="start"
+						sx={{ gap: 0.75, ml: 0 }}
 						control={
 							<Checkbox
 								checked={mixedEnableKun}
@@ -90,6 +94,8 @@ export const MixedSearchSourceSettings = () => {
 						label="Kungal"
 					/>
 					<FormControlLabel
+						labelPlacement="start"
+						sx={{ gap: 0.75, ml: 0 }}
 						control={
 							<Checkbox
 								checked={mixedEnableDlsite}
@@ -134,7 +140,7 @@ const TagTranslationSettings = () => {
 			justifyContent="flex-start"
 			spacing={1}
 		>
-				<Box sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+				<Box>
 					<Stack direction="row" alignItems="center">
 						<InputLabel className="font-semibold">
 							{t("pages.Settings.tagTranslation.title", "TAG翻译")}
@@ -167,9 +173,8 @@ const SpoilerLevelSettings = () => {
 			alignItems={{ xs: "stretch", sm: "center" }}
 			justifyContent="flex-start"
 			spacing={1}
-			sx={{ "& > :first-of-type": { width: { sm: 250 }, flexShrink: 0 } }}
 		>
-				<Box sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+				<Box>
 					<Stack direction="row" alignItems="center">
 						<InputLabel className="font-semibold">
 							{t("pages.Settings.spoilerLevel.title", "TAG剧透等级")}

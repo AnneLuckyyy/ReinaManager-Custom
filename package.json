@@ -1,13 +1,15 @@
 {
 	"name": "reinamanager-custom",
 	"private": true,
-	"version": "0.20.5-custom.1",
+	"version": "0.20.6",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
 		"build": "tsc -b && vite build",
-		"package:local": "tauri build --config src-tauri/tauri.local.conf.json",
-		"package:public": "tauri build --config src-tauri/tauri.public.conf.json",
+		"package": "tauri build --config src-tauri/tauri.public.conf.json",
+		"package:release": "pnpm run package",
+		"package:local": "pnpm run package",
+		"package:public": "pnpm run package",
 		"preview": "vite preview",
 		"tauri": "tauri",
 		"typecheck": "tsgo -b --noEmit",

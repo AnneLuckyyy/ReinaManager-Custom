@@ -72,7 +72,13 @@ export const GameArchiveSettings = () => {
 					]}
 				/>
 			</Stack>
-			<Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
+			<Stack
+				direction={{ xs: "column", sm: "row" }}
+				spacing={1}
+				alignItems={{ sm: "center" }}
+				useFlexGap
+				flexWrap="wrap"
+			>
 				<FormControl size="small" sx={{ minWidth: 140 }}>
 					<InputLabel id="game-archive-format-label">{t("pages.Settings.gameArchive.format", "归档格式")}</InputLabel>
 					<Select
@@ -98,27 +104,37 @@ export const GameArchiveSettings = () => {
 						))}
 					</Select>
 				</FormControl>
+				<FormControl size="small" sx={{ minWidth: 180 }}>
+					<InputLabel id="game-archive-delete-behavior-label">删除方式</InputLabel>
+					<Select labelId="game-archive-delete-behavior-label" label="删除方式" value={settings.deleteBehavior} onChange={(event) => updateSettings({ deleteBehavior: event.target.value as "permanent" | "recycle" })}>
+						<MenuItem value="recycle">移入回收站</MenuItem>
+						<MenuItem value="permanent">永久删除</MenuItem>
+					</Select>
+				</FormControl>
 			</Stack>
-			<Stack direction={{ xs: "column", sm: "row" }} sx={{ mt: 1 }} spacing={1}>
+			<Stack
+				direction={{ xs: "column", sm: "row" }}
+				sx={{ mt: 1 }}
+				spacing={1}
+				useFlexGap
+				flexWrap="wrap"
+			>
 				<FormControlLabel
+					labelPlacement="start"
+					sx={{ gap: 0.75, ml: 0 }}
 					control={<Checkbox checked={settings.requirePassword} onChange={(event) => updateSettings({ requirePassword: event.target.checked })} />}
 					label={t("pages.Settings.gameArchive.requirePassword", "打包时要求密码")}
 				/>
 				<FormControlLabel
+					labelPlacement="start"
+					sx={{ gap: 0.75, ml: 0 }}
 					disabled={settings.format !== "7z" || !settings.requirePassword}
 					control={<Checkbox checked={settings.encryptHeaders} onChange={(event) => updateSettings({ encryptHeaders: event.target.checked })} />}
 					label={t("pages.Settings.gameArchive.encryptHeaders", "加密文件名")}
 				/>
-			</Stack>
-			<FormControl size="small" sx={{ minWidth: 180, mt: 1.25 }}>
-				<InputLabel id="game-archive-delete-behavior-label">删除方式</InputLabel>
-				<Select labelId="game-archive-delete-behavior-label" label="删除方式" value={settings.deleteBehavior} onChange={(event) => updateSettings({ deleteBehavior: event.target.value as "permanent" | "recycle" })}>
-					<MenuItem value="recycle">移入回收站</MenuItem>
-					<MenuItem value="permanent">永久删除</MenuItem>
-				</Select>
-			</FormControl>
-			<Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1 }}>
 				<FormControlLabel
+					labelPlacement="start"
+					sx={{ gap: 0.75, ml: 0 }}
 					control={<Checkbox checked={protectGamesRootChildren} disabled={updatePersistedSettings.isPending} onChange={(event) => void setGamesRootProtection(event.target.checked)} />}
 					label="保护盘符 Games 直属目录"
 				/>

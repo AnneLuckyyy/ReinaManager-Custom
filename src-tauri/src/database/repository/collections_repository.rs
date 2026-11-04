@@ -46,6 +46,23 @@ impl CollectionsRepository {
         ids.into_iter().filter(|id| seen.insert(*id)).collect()
     }
 
+    fn validate_complete_child_reorder(
+        existing_ids: std::collections::HashSet<i32>,
+        ordered_ids: &[i32],
+    ) -> Result<(), DbErr> {
+        let provided_ids = ordered_ids
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        if provided_ids.len() != ordered_ids.len() {
+            return Err(DbErr::Custom("分类排序包含重复项".to_string()));
+        }
+        if existing_ids != provided_ids {
+            return Err(DbErr::Custom("分类列表已变化，请刷新后重试".to_string()));
+        }
+        Ok(())
+    }
+
     fn diff_game_collection_pairs(
         current_links: &[game_collection_link::Model],
         target_pairs: &[GameCollectionPair],
@@ -307,6 +324,55 @@ impl CollectionsRepository {
         active.updated_at = Set(Some(chrono::Utc::now().timestamp() as i32));
 
         active.update(db).await
+    }
+
+    /// 原子重排同一分组下的全部真实分类。
+    ///
+    /// 前端不能指定任意分类集合：传入的 ID 必须与该父分组当前全部子分类
+    /// 完全一致。这样即使页面数据过期或请求被篡改，也不会把其他分类挤出
+    /// 顺序或跨分组改写。
+    pub async fn reorder_children(
+        db: &DatabaseConnection,
+        parent_id: i32,
+        ordered_ids: Vec<i32>,
+    ) -> Result<(), DbErr> {
+        use std::collections::{HashMap, HashSet};
+
+        let txn = db.begin().await?;
+        let existing = Collections::find()
+            .filter(collections::Column::ParentId.eq(parent_id))
+            .all(&txn)
+            .await?;
+        let existing_ids = existing
+            .iter()
+            .map(|category| category.id)
+            .collect::<HashSet<_>>();
+
+        Self::validate_complete_child_reorder(existing_ids, &ordered_ids)?;
+
+        let mut by_id = existing
+            .into_iter()
+            .map(|category| (category.id, category))
+            .collect::<HashMap<_, _>>();
+        let now = chrono::Utc::now().timestamp() as i32;
+
+        for (sort_order, category_id) in ordered_ids.into_iter().enumerate() {
+            let category = by_id
+                .remove(&category_id)
+                .ok_or_else(|| DbErr::Custom("分类列表已变化，请刷新后重试".to_string()))?;
+            let sort_order = sort_order as i32;
+            if category.sort_order == sort_order {
+                continue;
+            }
+
+            let mut active: collections::ActiveModel = category.into();
+            active.sort_order = Set(sort_order);
+            active.updated_at = Set(Some(now));
+            active.update(&txn).await?;
+        }
+
+        txn.commit().await?;
+        Ok(())
     }
 
     /// 删除合集（会级联删除子合集和游戏关联）
@@ -582,5 +648,34 @@ impl CollectionsRepository {
                 game_count: counts.get(&category.id).copied().unwrap_or(0),
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CollectionsRepository;
+    use std::collections::HashSet;
+
+    #[test]
+    fn complete_child_reorder_requires_every_child_exactly_once() {
+        let existing_ids = HashSet::from([10, 20, 30]);
+        assert!(
+            CollectionsRepository::validate_complete_child_reorder(
+                existing_ids.clone(),
+                &[30, 10, 20],
+            )
+            .is_ok()
+        );
+        assert!(
+            CollectionsRepository::validate_complete_child_reorder(
+                existing_ids.clone(),
+                &[30, 10, 10],
+            )
+            .is_err()
+        );
+        assert!(
+            CollectionsRepository::validate_complete_child_reorder(existing_ids, &[30, 10])
+                .is_err()
+        );
     }
 }

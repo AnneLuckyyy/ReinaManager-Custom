@@ -54,8 +54,8 @@ export function ApplicationSourceFoldersSettings() {
 
 	return (
 		<Stack spacing={1.25}>
-			<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1.5}>
-				<Stack direction="row" alignItems="center" sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+			<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1}>
+				<Stack direction="row" alignItems="center">
 					<Typography variant="subtitle1" className="font-semibold">应用来源目录</Typography>
 					<SettingsHelp text="仅在这里点击“扫描来源目录”时，读取这些目录的直属 .lnk、.url 与 .exe，并把新发现的项目加入指定分类。不会持续监听、移动或删除文件。" />
 				</Stack>

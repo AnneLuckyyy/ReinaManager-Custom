@@ -74,7 +74,7 @@ export const AutoStartSettings = () => {
 			spacing={1.25}
 		>
 			<Stack direction="row" alignItems="center" spacing={1}>
-				<Box sx={{ width: 250, flexShrink: 0 }}><InputLabel className="font-semibold">
+				<Box><InputLabel className="font-semibold">
 					{t("pages.Settings.autoStart", "开机自启")}
 				</InputLabel></Box>
 				<Switch
@@ -87,7 +87,7 @@ export const AutoStartSettings = () => {
 				/>
 			</Stack>
 			<Stack direction="row" alignItems="center" spacing={1}>
-				<Box sx={{ width: 250, flexShrink: 0 }}><Stack direction="row" alignItems="center">
+				<Box><Stack direction="row" alignItems="center">
 					<InputLabel className="font-semibold">开机时静默启动</InputLabel>
 					<SettingsHelp text="仅开机自启时隐藏主窗口；托盘不可用会自动显示窗口。" />
 				</Stack></Box>
@@ -153,8 +153,7 @@ export const LogLevelSettings = () => {
 				direction={{ xs: "column", sm: "row" }}
 				alignItems={{ xs: "stretch", sm: "center" }}
 				justifyContent="flex-start"
-				spacing={1.5}
-				sx={{ "& > :first-of-type": { width: { sm: 250 }, flexShrink: 0 } }}
+			spacing={1}
 			>
 				<Stack direction="row" alignItems="center">
 						<InputLabel className="text-sm">
@@ -214,7 +213,13 @@ export const CloseBtnSettings = () => {
 			<InputLabel className="font-semibold mb-2">
 				{t("pages.Settings.closeSettings", "关闭设置")}
 			</InputLabel>
-			<Stack spacing={1}>
+			<Stack
+				direction={{ xs: "column", sm: "row" }}
+				alignItems={{ sm: "center" }}
+				spacing={1}
+				useFlexGap
+				flexWrap="wrap"
+			>
 				<Stack direction="row" alignItems="center" spacing={1}>
 					<Typography variant="body2">
 						{t("pages.Settings.skipCloseRemind", "不再提醒")}
@@ -226,24 +231,22 @@ export const CloseBtnSettings = () => {
 						color="primary"
 					/>
 				</Stack>
-				<Stack direction="row" spacing={1}>
-					<Button
-						size="small"
-						variant={defaultCloseAction === "hide" ? "contained" : "outlined"}
-						disabled={!skipCloseRemind}
-						onClick={() => setDefaultCloseAction("hide")}
-					>
-						{t("pages.Settings.closeToTray", "最小化到托盘")}
-					</Button>
-					<Button
-						size="small"
-						variant={defaultCloseAction === "close" ? "contained" : "outlined"}
-						disabled={!skipCloseRemind}
-						onClick={() => setDefaultCloseAction("close")}
-					>
-						{t("pages.Settings.closeApp", "直接退出应用")}
-					</Button>
-				</Stack>
+				<Button
+					size="small"
+					variant={defaultCloseAction === "hide" ? "contained" : "outlined"}
+					disabled={!skipCloseRemind}
+					onClick={() => setDefaultCloseAction("hide")}
+				>
+					{t("pages.Settings.closeToTray", "最小化到托盘")}
+				</Button>
+				<Button
+					size="small"
+					variant={defaultCloseAction === "close" ? "contained" : "outlined"}
+					disabled={!skipCloseRemind}
+					onClick={() => setDefaultCloseAction("close")}
+				>
+					{t("pages.Settings.closeApp", "直接退出应用")}
+				</Button>
 			</Stack>
 		</Box>
 	);

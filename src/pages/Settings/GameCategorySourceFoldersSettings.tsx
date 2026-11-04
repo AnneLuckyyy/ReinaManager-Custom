@@ -52,8 +52,8 @@ export function GameCategorySourceFoldersSettings() {
 
 	return (
 		<Stack spacing={1.25}>
-			<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1.5}>
-				<Stack direction="row" alignItems="center" sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+			<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="flex-start" spacing={1}>
+				<Stack direction="row" alignItems="center">
 					<Typography variant="subtitle1" className="font-semibold">游戏分类来源目录</Typography>
 					<SettingsHelp text="导入的游戏启动文件位于这里或其子目录时，成功入库后会加入指定收藏夹分类。重叠目录只采用更深的一项；不会扫描、监听、移动或删除文件。" />
 				</Stack>

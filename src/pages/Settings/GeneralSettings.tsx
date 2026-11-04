@@ -68,8 +68,7 @@ export const LanguageSelect = () => {
 			direction={{ xs: "column", sm: "row" }}
 			alignItems={{ xs: "stretch", sm: "center" }}
 			justifyContent="flex-start"
-			spacing={1.5}
-			sx={{ "& > .MuiInputLabel-root": { width: { sm: 250 }, flexShrink: 0 } }}
+			spacing={1}
 		>
 			<InputLabel id="language-select-label" className="font-semibold">
 				{t("pages.Settings.language", "语言")}
@@ -112,8 +111,7 @@ export const InterfaceZoomSettings = () => {
 			direction={{ xs: "column", sm: "row" }}
 			alignItems={{ xs: "stretch", sm: "center" }}
 			justifyContent="flex-start"
-			spacing={1.5}
-			sx={{ "& > :first-of-type": { width: { sm: 250 }, flexShrink: 0 } }}
+			spacing={1}
 		>
 			<Stack direction="row" alignItems="center">
 				<InputLabel id="interface-zoom-select-label" className="font-semibold">
@@ -158,8 +156,7 @@ export const StartupPageSettings = () => {
 			direction={{ xs: "column", sm: "row" }}
 			alignItems={{ xs: "stretch", sm: "center" }}
 			justifyContent="flex-start"
-			spacing={1.5}
-			sx={{ "& > :first-of-type": { width: { sm: 250 }, flexShrink: 0 } }}
+			spacing={1}
 		>
 			<Stack direction="row" alignItems="center">
 				<InputLabel id="startup-page-select-label" className="font-semibold">
@@ -271,7 +268,7 @@ export const CardClickModeSettings = () => {
 				/>
 			</Stack>
 			<Stack spacing={0.5}>
-				<Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap role="group" aria-label={t("pages.Settings.cardClickMode.title", "卡片点击模式")}>
+				<Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap role="group" aria-label={t("pages.Settings.cardClickMode.title", "卡片点击模式")}>
 					<Button
 						variant={cardClickMode === "navigate" ? "contained" : "outlined"}
 						onClick={() => setCardClickMode("navigate")}
@@ -321,7 +318,7 @@ export const CardClickModeSettings = () => {
 					].map((item) => (
 						<Box key={item.label} sx={{ py: 0.25 }}>
 							<Stack direction="row" alignItems="center" spacing={1}>
-								<Typography variant="body2" sx={{ width: { sm: 250 }, flexShrink: 0 }}>{item.label}</Typography>
+								<Typography variant="body2">{item.label}</Typography>
 								<Switch
 									checked={item.checked}
 									onChange={(event) => item.onChange(event.target.checked)}
@@ -418,7 +415,7 @@ export const GameLaunchSettings = () => {
 					justifyContent="flex-start"
 					sx={{ py: 1.25 }}
 				>
-					<Box sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+					<Box>
 						<Typography variant="body2" className="font-medium">
 							{t("pages.Settings.gameLaunch.magpieHotkey", "Magpie 全屏快捷键")}
 						</Typography>

@@ -200,7 +200,13 @@ export const DiskHealthSettings = () => {
 
 	return (
 		<Box className="mb-6">
-			<Stack direction="row" alignItems="center" spacing={1}>
+			<Stack
+				direction={{ xs: "column", sm: "row" }}
+				alignItems={{ sm: "center" }}
+				spacing={1}
+				useFlexGap
+				flexWrap="wrap"
+			>
 				<Box>
 					<Stack direction="row" alignItems="center">
 						<InputLabel className="font-semibold">
@@ -220,8 +226,6 @@ export const DiskHealthSettings = () => {
 					onChange={(event) => setEnabled(event.target.checked)}
 					disabled={loading || (!diskHealth.enabled && !ready)}
 				/>
-			</Stack>
-			<Stack direction="row" spacing={1} alignItems="center" className="mt-3">
 				<TextField
 					size="small"
 					label={t("pages.Settings.diskHealth.interval", "刷新间隔")}
@@ -248,7 +252,7 @@ export const DiskHealthSettings = () => {
 				alignItems="center"
 				useFlexGap
 				flexWrap="wrap"
-				className="mt-3"
+				className="mt-2"
 			>
 				<Button
 					variant="contained"

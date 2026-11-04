@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 export type GameArchiveTaskPhase =
-	| "idle"
+	| "queued"
 	| "preparing"
 	| "packing"
 	| "verifying"
@@ -11,104 +11,99 @@ export type GameArchiveTaskPhase =
 
 export type GameArchiveProgressEvent = {
 	gameId: number;
-	phase: Exclude<GameArchiveTaskPhase, "idle">;
+	phase: Exclude<GameArchiveTaskPhase, "queued">;
 	message: string;
+	progress?: number | null;
+};
+
+export type GameArchiveTask = {
+	id: number;
+	gameId: number;
+	gameName: string;
+	phase: GameArchiveTaskPhase;
+	message: string;
+	progress: number | null;
+	archivePath: string | null;
 };
 
 type GameArchiveTaskState = {
-	gameId: number | null;
-	gameName: string | null;
-	phase: GameArchiveTaskPhase;
-	message: string | null;
-	archivePath: string | null;
-	queuedCount: number;
-	completedInBatch: number;
-	totalInBatch: number;
+	tasks: GameArchiveTask[];
 	expanded: boolean;
-	start: (gameId: number, gameName: string) => void;
+	queue: (gameId: number, gameName: string) => number;
+	start: (taskId: number) => void;
 	applyProgress: (progress: GameArchiveProgressEvent) => void;
-	complete: (archivePath: string, message: string) => void;
-	fail: (message: string) => void;
-	queue: () => void;
-	finishQueueJob: () => void;
+	complete: (gameId: number, archivePath: string, message: string) => void;
+	fail: (gameId: number, message: string, archivePath?: string) => void;
 	expand: () => void;
 	collapse: () => void;
 	dismiss: () => void;
 };
 
+let nextTaskId = 1;
+
+function updateActiveGameTask(
+	tasks: GameArchiveTask[],
+	gameId: number,
+	update: (task: GameArchiveTask) => GameArchiveTask,
+) {
+	let updated = false;
+	return tasks.map((task) => {
+		if (!updated && task.gameId === gameId && !["queued", "completed", "failed"].includes(task.phase)) {
+			updated = true;
+			return update(task);
+		}
+		return task;
+	});
+}
+
 /** 归档任务只存于当前运行内存，重启后不假装仍有后台任务。 */
 export const useGameArchiveTaskStore = create<GameArchiveTaskState>()((set) => ({
-	gameId: null,
-	gameName: null,
-	phase: "idle",
-	message: null,
-	archivePath: null,
-	queuedCount: 0,
-	completedInBatch: 0,
-	totalInBatch: 0,
+	tasks: [],
 	expanded: false,
-	start: (gameId, gameName) => set({
-		gameId,
-		gameName,
-		phase: "preparing",
-		message: "正在准备打包任务",
-		archivePath: null,
-		expanded: false,
-	}),
-	applyProgress: (progress) => set((current) => (
-		current.gameId === progress.gameId
-			? { phase: progress.phase, message: progress.message }
-			: current
-	)),
-	complete: (archivePath, message) => set({
-		phase: "completed",
-		message,
-		archivePath,
-	}),
-	fail: (message) => set({ phase: "failed", message }),
-	queue: () => set((current) => {
-		const isNewBatch = current.queuedCount === 0 && current.phase === "idle";
+	queue: (gameId, gameName) => {
+		const taskId = nextTaskId++;
+		set((current) => ({
+			tasks: [...current.tasks, { id: taskId, gameId, gameName, phase: "queued", message: "正在等待前方任务完成", progress: null, archivePath: null }],
+		}));
+		return taskId;
+	},
+	start: (taskId) => set((current) => ({
+		tasks: current.tasks.map((task) => task.id === taskId ? { ...task, phase: "preparing", message: "正在准备打包任务", progress: null } : task),
+	})),
+	applyProgress: (progress) => set((current) => ({
+		tasks: updateActiveGameTask(current.tasks, progress.gameId, (task) => ({ ...task, phase: progress.phase, message: progress.message, progress: progress.progress ?? null })),
+	})),
+	complete: (gameId, archivePath, message) => set((current) => ({
+		tasks: updateActiveGameTask(current.tasks, gameId, (task) => ({ ...task, phase: "completed", message, progress: 100, archivePath: archivePath || null })),
+	})),
+	fail: (gameId, message, archivePath) => set((current) => {
+		const taskId = [...current.tasks].reverse().find((task) => task.gameId === gameId && task.phase !== "queued")?.id;
 		return {
-			queuedCount: current.queuedCount + 1,
-			completedInBatch: isNewBatch ? 0 : current.completedInBatch,
-			totalInBatch: isNewBatch ? 1 : current.totalInBatch + 1,
+			tasks: current.tasks.map((task) => task.id === taskId ? { ...task, phase: "failed", message, progress: null, archivePath: archivePath || task.archivePath } : task),
 		};
 	}),
-	finishQueueJob: () => set((current) => ({
-		queuedCount: Math.max(0, current.queuedCount - 1),
-		completedInBatch: current.completedInBatch + 1,
-	})),
 	expand: () => set({ expanded: true }),
 	collapse: () => set({ expanded: false }),
-	dismiss: () => set({
-		gameId: null,
-		gameName: null,
-		phase: "idle",
-		message: null,
-		archivePath: null,
-		queuedCount: 0,
-		completedInBatch: 0,
-		totalInBatch: 0,
-		expanded: false,
-	}),
+	dismiss: () => set({ tasks: [], expanded: false }),
 }));
 
-type ArchiveQueueJob = () => Promise<void>;
+type ArchiveQueueJob = { taskId: number; run: (taskId: number) => Promise<void> };
 let archiveQueue: ArchiveQueueJob[] = [];
 let processing = false;
 let successDismissTimer: ReturnType<typeof setTimeout> | null = null;
 
-/**
- * 单线程归档队列。密码与具体操作闭包只保留在当前进程内存，绝不写入 store。
- * 每项自行报告成功/失败，队列始终继续处理下一项。
- */
-export function enqueueGameArchive(job: ArchiveQueueJob) {
+/** 单线程归档队列：密码只保留在当前进程闭包中，每项失败也会继续后续项。 */
+export function enqueueGameArchive(params: {
+	gameId: number;
+	gameName: string;
+	run: (taskId: number) => Promise<void>;
+}) {
 	if (successDismissTimer) {
 		clearTimeout(successDismissTimer);
 		successDismissTimer = null;
 	}
-	archiveQueue.push(job);
-	useGameArchiveTaskStore.getState().queue();
+	const taskId = useGameArchiveTaskStore.getState().queue(params.gameId, params.gameName);
+	archiveQueue.push({ taskId, run: params.run });
 	if (!processing) void processArchiveQueue();
 }
 
@@ -117,19 +112,19 @@ async function processArchiveQueue() {
 	while (archiveQueue.length > 0) {
 		const job = archiveQueue.shift();
 		if (!job) continue;
+		useGameArchiveTaskStore.getState().start(job.taskId);
 		try {
-			await job();
+			await job.run(job.taskId);
 		} catch {
 			// 具体任务已负责展示失败原因；此处仅保证后续项继续执行。
 		}
-		useGameArchiveTaskStore.getState().finishQueueJob();
 	}
 	processing = false;
 	const state = useGameArchiveTaskStore.getState();
-	if (state.phase === "completed") {
+	if (state.tasks.length > 0 && state.tasks.every((task) => task.phase === "completed")) {
 		successDismissTimer = setTimeout(() => {
 			const latest = useGameArchiveTaskStore.getState();
-			if (latest.queuedCount === 0 && latest.phase === "completed") latest.dismiss();
-		}, 4500);
+			if (latest.tasks.length > 0 && latest.tasks.every((task) => task.phase === "completed")) latest.dismiss();
+		}, 6000);
 	}
 }

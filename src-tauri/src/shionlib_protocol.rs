@@ -14,7 +14,6 @@ use url::Url;
 
 const INSTALL_SCHEME: &str = "reinamanager";
 const DEV_INSTALL_SCHEME: &str = "reinamanager-test";
-const CUSTOM_INSTALL_SCHEME: &str = "reinamanager-custom";
 const INSTALL_HOST: &str = "install";
 const PROTOCOL_VERSION: u32 = 1;
 const SHIONLIB_PROVIDER: &str = "shionlib";
@@ -42,9 +41,7 @@ const SUPPORTED_ARCHIVE_FORMATS: &[&str] = &[
 ];
 
 fn is_install_scheme(scheme: &str) -> bool {
-    scheme == INSTALL_SCHEME
-        || scheme == CUSTOM_INSTALL_SCHEME
-        || (cfg!(debug_assertions) && scheme == DEV_INSTALL_SCHEME)
+    scheme == INSTALL_SCHEME || (cfg!(debug_assertions) && scheme == DEV_INSTALL_SCHEME)
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -551,15 +548,6 @@ mod tests {
         assert_eq!(preview.title, "Test Game");
         assert_eq!(preview.download_host, "cdn.example.com");
         assert_eq!(preview.checksum_algorithm.as_deref(), Some("sha256"));
-    }
-
-    #[test]
-    fn accepts_the_public_custom_install_scheme() {
-        let custom_url = Url::parse(
-            "reinamanager-custom://install?v=1&provider=shionlib&resource_id=42&url=https%3A%2F%2Fcdn.example.com%2Fgame.7z&file_name=game.7z&archive_format=7z&size=123&title=Test",
-        )
-        .unwrap();
-        assert!(parse_shionlib_install_url(custom_url).is_ok());
     }
 
     #[test]

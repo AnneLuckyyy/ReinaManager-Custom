@@ -1,12 +1,11 @@
 {
-	"productName": "ReinaManager Custom",
-	"version": "0.20.5-custom.1",
-	"identifier": "io.github.anneluckyyy.reinamanager-custom",
-	"mainBinaryName": "ReinaManagerCustom",
+	"productName": "ReinaManager",
+	"version": "0.20.6",
+	"identifier": "com.reinamanager.dev",
 	"app": {
 		"windows": [
 			{
-				"title": "ReinaManager Custom",
+				"title": "ReinaManager Ciallo～(∠・ω< )⌒★",
 				"width": 1200,
 				"height": 720,
 				"minWidth": 1024,
@@ -47,16 +46,21 @@
 			}
 		},
 		"createUpdaterArtifacts": false,
-		"publisher": "AnneLucky",
+		"publisher": "huoshen80",
 		"copyright": "Copyright © 2025 huoshen80; modified edition © 2026 AnneLucky",
 		"homepage": "https://github.com/AnneLuckyyy/ReinaManager-Custom",
 		"category": "Game"
 	},
 	"plugins": {
+		"updater": {
+			"endpoints": [],
+			"dialog": false,
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI0MzZDRDk1QzdDMTU3OTgKUldTWVY4SEhsYzAySktqTVVKdVRjWFBJbnRubGx6cWROeHloc3dpZ252MGVtSUI0REVIaEUzYnQK"
+		},
 		"deep-link": {
 			"desktop": {
 				"schemes": [
-					"reinamanager-custom"
+					"reinamanager"
 				]
 			}
 		}

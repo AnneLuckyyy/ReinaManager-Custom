@@ -1,6 +1,6 @@
 import BugReportIcon from "@mui/icons-material/BugReport";
 import MenuBookIcon from "@mui/icons-material/MenuBook";
-import { Alert, Link, Typography } from "@mui/material";
+import { Link, Typography } from "@mui/material";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Stack from "@mui/material/Stack";
@@ -8,6 +8,7 @@ import pkg from "@pkg";
 import { open as openurl } from "@tauri-apps/plugin-shell";
 import type React from "react";
 import { useTranslation } from "react-i18next";
+import { AdvancedSettingsHelp } from "@/components/AdvancedSettingsHelp";
 
 export const AboutSection: React.FC = () => {
 	const { t } = useTranslation();
@@ -26,12 +27,23 @@ export const AboutSection: React.FC = () => {
 
 	return (
 		<Box className="space-y-2">
-			<Alert severity="info" variant="outlined" sx={{ alignItems: "flex-start" }}>
-				<Typography variant="body2" fontWeight={700}>非官方改版</Typography>
-				<Typography variant="caption" component="div">
-					本应用基于 huoshen80 的 ReinaManager 修改，沿用 AGPL-3.0 许可证。功能问题请通过本改版的发布渠道反馈，不要要求原项目作者处理改版特有问题。
-				</Typography>
-			</Alert>
+			<Stack direction="row" alignItems="center" spacing={0.5}>
+				<Typography variant="caption" color="text.secondary">非官方改版</Typography>
+				<AdvancedSettingsHelp
+					tooltip="查看来源、许可证与反馈说明。"
+					title="关于此改版"
+					sections={[
+						{
+							title: "来源与许可证",
+							content: "本应用基于 huoshen80 的 ReinaManager 修改，并继续使用 AGPL-3.0 许可证。",
+						},
+						{
+							title: "反馈",
+							content: "改版特有的问题请通过本改版项目页反馈；原项目的问题仍可前往原项目渠道提交。",
+						},
+					]}
+				/>
+			</Stack>
 			{/* 版本与改版更新通道 */}
 			<Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} spacing={1}>
 			<Typography variant="body2">

@@ -470,6 +470,18 @@ pub async fn update_collection(
         .map_err(|e| format!("更新合集失败: {}", e))
 }
 
+/// 原子更新同一分组内全部分类的自定义顺序。
+#[tauri::command]
+pub async fn reorder_collection_categories(
+    db: State<'_, DatabaseConnection>,
+    parent_id: i32,
+    category_ids: Vec<i32>,
+) -> Result<(), String> {
+    CollectionsRepository::reorder_children(&db, parent_id, category_ids)
+        .await
+        .map_err(|e| format!("更新分类排序失败: {}", e))
+}
+
 /// 删除合集
 #[tauri::command]
 pub async fn delete_collection(db: State<'_, DatabaseConnection>, id: i32) -> Result<u64, String> {

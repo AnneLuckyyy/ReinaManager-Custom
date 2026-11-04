@@ -51,8 +51,7 @@ export function ThemeModeSettings() {
 			direction={{ xs: "column", sm: "row" }}
 			alignItems={{ xs: "stretch", sm: "center" }}
 			justifyContent="flex-start"
-			spacing={1.5}
-			sx={{ "& > .MuiInputLabel-root": { width: { sm: 250 }, flexShrink: 0 } }}
+			spacing={1}
 		>
 			<InputLabel id="theme-mode-select-label" className="font-semibold">
 				{t("components.Toolbar.theme", "主题")}

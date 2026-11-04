@@ -1,4 +1,4 @@
-import { FormControlLabel, Stack, Switch, Typography } from "@mui/material";
+import { Stack, Switch, Typography } from "@mui/material";
 import { AdvancedSettingsHelp } from "@/components/AdvancedSettingsHelp";
 import { useModStore } from "@/store/modStore";
 
@@ -33,8 +33,14 @@ export function DownloadAutomationSettings() {
 					]}
 				/>
 			</Stack>
-			<FormControlLabel control={<Switch checked={defaults.autoImport} onChange={(event) => update({ autoImport: event.target.checked, autoDelete: event.target.checked ? defaults.autoDelete : false })} />} label="新任务默认自动入库" />
-			<FormControlLabel disabled={!defaults.autoImport} control={<Switch checked={defaults.autoDelete} onChange={(event) => update({ autoDelete: event.target.checked })} />} label="入库成功后自动删除任务文件" />
+			<Stack direction="row" alignItems="center" spacing={1}>
+				<Typography variant="body2">新任务默认自动入库</Typography>
+				<Switch checked={defaults.autoImport} onChange={(event) => update({ autoImport: event.target.checked, autoDelete: event.target.checked ? defaults.autoDelete : false })} />
+			</Stack>
+			<Stack direction="row" alignItems="center" spacing={1}>
+				<Typography variant="body2" color={defaults.autoImport ? "text.primary" : "text.disabled"}>入库成功后自动删除任务文件</Typography>
+				<Switch disabled={!defaults.autoImport} checked={defaults.autoDelete} onChange={(event) => update({ autoDelete: event.target.checked })} />
+			</Stack>
 		</Stack>
 	);
 }

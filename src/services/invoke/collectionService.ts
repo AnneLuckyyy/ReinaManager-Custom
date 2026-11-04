@@ -40,6 +40,19 @@ class CollectionService extends BaseService {
 	}
 
 	/**
+	 * 原子重排同一分组内全部真实分类。后端会复核传入集合完整且未跨分组。
+	 */
+	async reorderCollectionCategories(
+		parentId: number,
+		categoryIds: number[],
+	): Promise<void> {
+		return this.invoke<void>("reorder_collection_categories", {
+			parentId,
+			categoryIds,
+		});
+	}
+
+	/**
 	 * 删除合集
 	 */
 	async deleteCollection(id: number): Promise<number> {

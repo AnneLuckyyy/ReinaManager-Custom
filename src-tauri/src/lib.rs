@@ -29,7 +29,7 @@ use download_tasks::{
     register_moved_download_game, restart_download_task, resume_download_task,
     update_download_task_automation,
 };
-use install_archive::archive_game_directory;
+use install_archive::{archive_game_directory, preflight_game_archive};
 use migration::migrate_database;
 use shionlib_protocol::{
     ShionlibProtocolState, create_shionlib_download_task, setup_shionlib_install_protocol,
@@ -140,6 +140,7 @@ pub fn run() {
             resolve_steam_shortcut_file,
             import_clipboard_image_to_temp,
 			archive_game_directory,
+			preflight_game_archive,
             copy_file,
             create_savedata_backup,
             delete_savedata_backup,
@@ -231,6 +232,7 @@ pub fn run() {
             create_collection,
             find_root_collections,
             update_collection,
+            reorder_collection_categories,
             delete_collection,
             remove_games_from_collection,
             get_games_in_collection,

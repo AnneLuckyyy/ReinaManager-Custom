@@ -148,6 +148,10 @@ class FileService extends BaseService {
 		});
 	}
 
+	async preflightGameArchive(gameId: number): Promise<void> {
+		return this.invoke<void>("preflight_game_archive", { gameId });
+	}
+
 	/**
 	 * 判断当前是否为便携模式
 	 */

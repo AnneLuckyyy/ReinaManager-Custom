@@ -51,7 +51,7 @@ import {
 	useGroups,
 	useRenameCategory,
 	useRenameGroup,
-	useUpdateCategorySortOrder,
+	useReorderCategories,
 } from "@/hooks/queries/useCollections";
 import { snackbar } from "@/providers/snackBar";
 import { useStore } from "@/store/appStore";
@@ -207,7 +207,7 @@ export const Collection: React.FC = () => {
 	const deleteGroupMutation = useDeleteGroup();
 	const renameGroupMutation = useRenameGroup();
 	const renameCategoryMutation = useRenameCategory();
-	const updateCategorySortOrderMutation = useUpdateCategorySortOrder();
+	const reorderCategoriesMutation = useReorderCategories();
 
 	// 使用统一的虚拟分类 Hook
 	const virtualCategories = useVirtualCategories(gameIndex);
@@ -288,9 +288,13 @@ export const Collection: React.FC = () => {
 
 	const categories = getDisplayCategories();
 	const sortableCategoryIds = useMemo(
-		() => categories.map((c) => c.id),
-		[categories],
+		() => categories.filter((category) => !virtualCategories.isVirtual(category.id)).map((category) => category.id),
+		[categories, virtualCategories],
 	);
+	const canDragCategories =
+		folderDragEnabled &&
+		currentGroupId !== null &&
+		!currentGroupId.startsWith("default_");
 
 	/**
 	 * 处理分类拖拽结束
@@ -300,34 +304,42 @@ export const Collection: React.FC = () => {
 			const { active, over } = event;
 			setActiveCategoryId(null);
 
-			if (!over || active.id === over.id) return;
+			if (!over || active.id === over.id || reorderCategoriesMutation.isPending) return;
 
 			const oldIndex = categories.findIndex((c) => c.id === active.id);
 			const newIndex = categories.findIndex((c) => c.id === over.id);
 
 			if (oldIndex === -1 || newIndex === -1) return;
 
-			const sortedCats = arrayMove(categories, oldIndex, newIndex);
-			const realCategories = sortedCats.filter((c) => !virtualCategories.isVirtual(c.id));
+			const parentId = Number.parseInt(currentGroupId ?? "", 10);
+			if (Number.isNaN(parentId)) return;
 
-			const updates = [];
-			for (let i = 0; i < realCategories.length; i++) {
-				const cat = realCategories[i];
-				const newSortOrder = i + 1;
-				if (cat.sort_order !== newSortOrder) {
-					updates.push(
-						updateCategorySortOrderMutation.mutateAsync({
-							categoryId: cat.id,
-							sortOrder: newSortOrder,
-						}),
-					);
-				}
+			const orderedRealCategoryIds = arrayMove(categories, oldIndex, newIndex)
+				.filter((category) => !virtualCategories.isVirtual(category.id))
+				.map((category) => category.id);
+
+			try {
+				await reorderCategoriesMutation.mutateAsync({
+					parentId,
+					categoryIds: orderedRealCategoryIds,
+				});
+				await categoriesQuery.refetch();
+			} catch (error) {
+				snackbar.error(
+					t("pages.Collection.errors.reorderCategoriesFailed", {
+						defaultValue: "分类排序保存失败，请刷新后重试",
+					}),
+				);
 			}
-
-			await Promise.all(updates);
-			categoriesQuery.refetch();
 		},
-		[categories, virtualCategories, updateCategorySortOrderMutation, categoriesQuery],
+		[
+			categories,
+			virtualCategories,
+			reorderCategoriesMutation,
+			categoriesQuery,
+			currentGroupId,
+			t,
+		],
 	);
 
 	/**
@@ -757,7 +769,7 @@ export const Collection: React.FC = () => {
 							{t("pages.Collection.noCategoriesHint", "当前分组下没有分类")}
 						</Typography>
 					</Box>
-				) : folderDragEnabled ? (
+				) : canDragCategories ? (
 					<DndContext
 						sensors={sensors}
 						collisionDetection={closestCenter}

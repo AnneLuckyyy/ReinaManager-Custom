@@ -564,7 +564,7 @@ export const CollectionSyncSettings = () => {
 			</InputLabel>
 			<Box className="pl-1 space-y-1">
 				<Stack direction="row" alignItems="center" spacing={1}>
-					<Box sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+					<Box>
 						<Stack direction="row" alignItems="center">
 							<InputLabel className="font-semibold">
 							{t(
@@ -587,7 +587,7 @@ export const CollectionSyncSettings = () => {
 					/>
 				</Stack>
 				<Stack direction="row" alignItems="center" spacing={1}>
-					<Box sx={{ width: { sm: 250 }, flexShrink: 0 }}>
+					<Box>
 						<Stack direction="row" alignItems="center">
 							<InputLabel className="font-semibold">
 							{t(

@@ -279,13 +279,22 @@ const RightMenu: React.FC<RightMenuProps> = ({
 		const queuedSettings = { ...archiveSettings };
 		const queuedPassword = archivePassword;
 		const queuedDelete = deleteAfterArchive;
+		try {
+			await fileService.preflightGameArchive(queuedGame.id);
+		} catch (error) {
+			snackbar.error(getUserErrorMessage(error, t, t("components.RightMenu.archiveFailed", "打包游戏目录失败")));
+			return;
+		}
 		setArchiveOpen(false);
 		setArchivePassword("");
 		onClose();
-		enqueueGameArchive(async () => {
-			const taskStore = useGameArchiveTaskStore.getState();
-			taskStore.start(queuedGame.id, queuedGame.name?.trim() || "未命名游戏");
+		enqueueGameArchive({
+			gameId: queuedGame.id,
+			gameName: queuedGame.name?.trim() || "未命名游戏",
+			run: async () => {
+				const taskStore = useGameArchiveTaskStore.getState();
 			let archiveFinished = false;
+			let completedArchivePath: string | undefined;
 			try {
 				const result = await fileService.archiveGameDirectory({
 					gameId: queuedGame.id,
@@ -297,6 +306,11 @@ const RightMenu: React.FC<RightMenuProps> = ({
 					deleteBehavior: queuedSettings.deleteBehavior,
 				});
 				archiveFinished = true;
+				completedArchivePath = result.archive_path;
+				if (result.warning) {
+					taskStore.fail(queuedGame.id, result.warning, result.archive_path);
+					return;
+				}
 				if (result.source_deleted) {
 					const primaryPath = queuedGame.localpath!;
 					const existingPaths = (queuedGame.custom_data?.extraLocalPaths ?? []).filter((path): path is string => Boolean(path?.trim()));
@@ -304,13 +318,14 @@ const RightMenu: React.FC<RightMenuProps> = ({
 					const extraLocalPaths = existingPaths.some((path) => pathKey(path) === pathKey(primaryPath)) ? existingPaths : [...existingPaths, primaryPath];
 					await updateGameMutation.mutateAsync({ gameId: queuedGame.id, updates: { localpath: null, custom_data: { ...queuedGame.custom_data, extraLocalPaths } } });
 				}
-				taskStore.complete(result.archive_path, result.warning ?? (result.source_deleted ? t("components.RightMenu.archiveAndCloudSuccess", "已打包、校验并删除原目录，游戏已设为云端游戏") : t("components.RightMenu.archiveSuccess", "游戏目录已打包并校验完成")));
+				taskStore.complete(queuedGame.id, result.archive_path, result.source_deleted ? t("components.RightMenu.archiveAndCloudSuccess", "已打包、校验并删除原目录，游戏已设为云端游戏") : t("components.RightMenu.archiveSuccess", "游戏目录已打包并校验完成"));
 			} catch (error) {
 				console.error("打包游戏目录失败:", error);
 				const message = getUserErrorMessage(error, t, t("components.RightMenu.archiveFailed", "打包游戏目录失败"));
-				if (archiveFinished) taskStore.complete("", `打包已完成，但游戏记录未能更新：${message}`);
-				else taskStore.fail(message);
+				if (archiveFinished) taskStore.fail(queuedGame.id, `压缩包已完成，但游戏记录未能更新：${message}`, completedArchivePath);
+				else taskStore.fail(queuedGame.id, message);
 			}
+			},
 		});
 	};
 

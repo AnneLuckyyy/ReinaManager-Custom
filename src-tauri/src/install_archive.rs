@@ -9,9 +9,10 @@ use std::{
     collections::{BTreeMap, HashSet},
     ffi::{OsStr, OsString},
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Output, Stdio},
+    thread,
 };
 use tauri::{Emitter, Manager, State};
 use walkdir::WalkDir;
@@ -34,12 +35,41 @@ pub struct GameArchiveResult {
     pub warning: Option<String>,
 }
 
+#[tauri::command]
+pub async fn preflight_game_archive(
+    db: State<'_, DatabaseConnection>,
+    game_id: i32,
+) -> Result<(), String> {
+    let game = games::Entity::find_by_id(game_id)
+        .one(db.inner())
+        .await
+        .map_err(|error| format!("读取游戏记录失败: {error}"))?
+        .ok_or_else(|| "游戏记录不存在".to_string())?;
+    if game.launch_type.eq_ignore_ascii_case("steam") {
+        return Err("Steam 游戏不能使用本地目录打包".to_string());
+    }
+    let executable_path = game
+        .localpath
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| "该游戏没有主路径，不能打包".to_string())?;
+    let source = Path::new(executable_path.trim())
+        .parent()
+        .ok_or_else(|| "主路径没有可打包的游戏目录".to_string())?;
+    let metadata = fs::symlink_metadata(source)
+        .map_err(|error| format!("游戏目录不存在或无法读取: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("主路径上级不是安全的普通游戏目录".to_string());
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GameArchiveProgress {
     game_id: i32,
     phase: &'static str,
     message: String,
+    progress: Option<u8>,
 }
 
 fn emit_archive_progress(
@@ -54,6 +84,19 @@ fn emit_archive_progress(
             game_id,
             phase,
             message: message.into(),
+            progress: None,
+        },
+    );
+}
+
+fn emit_archive_packing_progress(app: &tauri::AppHandle, game_id: i32, progress: u8) {
+    let _ = app.emit(
+        "game-archive-progress",
+        GameArchiveProgress {
+            game_id,
+            phase: "packing",
+            message: format!("正在压缩游戏目录（{progress}/100）"),
+            progress: Some(progress),
         },
     );
 }
@@ -208,7 +251,9 @@ pub async fn archive_game_directory(
         OsString::from(format!("-t{format}")),
         OsString::from(format!("-mx={compression_level}")),
         OsString::from("-y"),
-        OsString::from("-bd"),
+        // `-bsp1` lets 7-Zip write percentage updates to stdout. When a build of
+        // 7-Zip does not provide them the UI keeps the regular indeterminate state.
+        OsString::from("-bsp1"),
         OsString::from("-bb0"),
         OsString::from("-sccUTF-8"),
     ];
@@ -224,11 +269,13 @@ pub async fn archive_game_directory(
 
     let result = (|| {
         emit_archive_progress(&app, game_id, "packing", "正在压缩游戏目录");
-        let output = run_command_in_directory(
+        let output = run_game_archive_command(
             &seven_zip,
             arguments.iter().map(OsString::as_os_str),
             password.as_deref(),
             Some(parent),
+            &app,
+            game_id,
         )?;
         ensure_success("创建压缩包", &output, password.is_some())?;
         emit_archive_progress(&app, game_id, "verifying", "正在校验压缩包内容");
@@ -481,7 +528,14 @@ fn move_directory_to_recycle_bin(source: &Path) -> Result<(), String> {
         core::PCWSTR,
     };
 
-    let mut source_wide: Vec<u16> = source.as_os_str().encode_wide().collect();
+    // canonicalize 在 Windows 上可能返回 `\\?\` 扩展路径；旧 Shell 回收站 API
+    // 不接受该形式，即使文件系统操作本身有效。
+    let shell_path = source
+        .to_string_lossy()
+        .strip_prefix(r"\\?\")
+        .map(str::to_owned)
+        .unwrap_or_else(|| source.to_string_lossy().into_owned());
+    let mut source_wide: Vec<u16> = std::ffi::OsStr::new(&shell_path).encode_wide().collect();
     // SHFileOperationW requires a double-NUL terminated file list.
     source_wide.extend([0, 0]);
     let mut operation = SHFILEOPSTRUCTW {
@@ -492,7 +546,9 @@ fn move_directory_to_recycle_bin(source: &Path) -> Result<(), String> {
     };
     let result = unsafe { SHFileOperationW(&mut operation) };
     if result != 0 || operation.fAnyOperationsAborted.as_bool() {
-        return Err(format!("移入回收站失败（Shell 返回 {result}）"));
+        return Err(format!(
+            "移入回收站失败（Shell 返回 {result}；原目录未删除）"
+        ));
     }
     Ok(())
 }
@@ -716,6 +772,126 @@ fn run_command_in_directory<'a>(
         .map_err(|error| InstallArchiveError::Other(format!("等待内置 7-Zip 结束失败: {error}")))
 }
 
+/// 打包时保留 7-Zip 的实时标准输出，以便在其提供百分比时展示真实进度。
+/// 其它 7-Zip 调用仍使用静默的通用封装，避免改变下载/安装流程的输出语义。
+fn run_game_archive_command<'a>(
+    executable: &Path,
+    args: impl IntoIterator<Item = &'a OsStr>,
+    password: Option<&str>,
+    working_directory: Option<&Path>,
+    app: &tauri::AppHandle,
+    game_id: i32,
+) -> Result<Output, InstallArchiveError> {
+    let mut command = Command::new(executable);
+    command
+        .args(args)
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(working_directory) = working_directory {
+        command.current_dir(working_directory);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+        command.creation_flags(CREATE_NO_WINDOW.0);
+    }
+
+    let mut child = command
+        .spawn()
+        .map_err(|error| InstallArchiveError::Other(format!("启动内置 7-Zip 失败: {error}")))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(password.unwrap_or_default().as_bytes());
+        let _ = stdin.write_all(b"\n");
+    }
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| InstallArchiveError::Other("无法读取内置 7-Zip 输出".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| InstallArchiveError::Other("无法读取内置 7-Zip 错误输出".to_string()))?;
+    let progress_app = app.clone();
+    let stdout_reader = thread::spawn(move || -> std::io::Result<Vec<u8>> {
+        let mut reader = stdout;
+        let mut output = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        let mut pending = String::new();
+        let mut last_progress = None;
+        loop {
+            let read = reader.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            output.extend_from_slice(&buffer[..read]);
+            pending.push_str(&String::from_utf8_lossy(&buffer[..read]));
+            while let Some(index) = pending.find(['\r', '\n']) {
+                let line = pending[..index].to_string();
+                pending.drain(..=index);
+                if let Some(progress) = parse_seven_zip_progress(&line)
+                    && last_progress != Some(progress)
+                {
+                    emit_archive_packing_progress(&progress_app, game_id, progress);
+                    last_progress = Some(progress);
+                }
+            }
+        }
+        if let Some(progress) = parse_seven_zip_progress(&pending)
+            && last_progress != Some(progress)
+        {
+            emit_archive_packing_progress(&progress_app, game_id, progress);
+        }
+        Ok(output)
+    });
+    let stderr_reader = thread::spawn(move || -> std::io::Result<Vec<u8>> {
+        let mut reader = stderr;
+        let mut output = Vec::new();
+        reader.read_to_end(&mut output)?;
+        Ok(output)
+    });
+    let status = child
+        .wait()
+        .map_err(|error| InstallArchiveError::Other(format!("等待内置 7-Zip 结束失败: {error}")))?;
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| InstallArchiveError::Other("读取内置 7-Zip 输出时异常结束".to_string()))?
+        .map_err(|error| InstallArchiveError::Other(format!("读取内置 7-Zip 输出失败: {error}")))?;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| InstallArchiveError::Other("读取内置 7-Zip 错误输出时异常结束".to_string()))?
+        .map_err(|error| {
+            InstallArchiveError::Other(format!("读取内置 7-Zip 错误输出失败: {error}"))
+        })?;
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn parse_seven_zip_progress(line: &str) -> Option<u8> {
+    let percent_index = line.rfind('%')?;
+    let digits = line[..percent_index]
+        .chars()
+        .rev()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    if digits.is_empty() {
+        return None;
+    }
+    let progress = digits
+        .chars()
+        .rev()
+        .collect::<String>()
+        .parse::<u8>()
+        .ok()?;
+    (progress <= 100).then_some(progress)
+}
+
 fn ensure_success(
     action: &str,
     output: &Output,
@@ -831,7 +1007,8 @@ fn remove_owned_directory(path: &Path) -> Result<(), InstallArchiveError> {
 mod tests {
     use super::{
         archive_file_manifest, audit_archive_listing, ensure_success, is_drive_games_child,
-        normalize_archive_path, run_command_in_directory, source_file_manifest,
+        normalize_archive_path, parse_seven_zip_progress, run_command_in_directory,
+        source_file_manifest,
     };
     use std::{
         ffi::OsStr,
@@ -859,6 +1036,14 @@ mod tests {
         assert!(audit_archive_listing(duplicate).is_err());
     }
 
+    #[test]
+    fn parses_7zip_percent_output_without_guessing_other_numbers() {
+        assert_eq!(parse_seven_zip_progress(" 35% + game/save.dat"), Some(35));
+        assert_eq!(parse_seven_zip_progress("100%"), Some(100));
+        assert_eq!(parse_seven_zip_progress("Files: 35"), None);
+        assert_eq!(parse_seven_zip_progress("101%"), None);
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn protects_direct_children_of_drive_games_root() {
@@ -867,6 +1052,22 @@ mod tests {
             r"F:\Games\Anime Games\alicenation"
         )));
         assert!(!is_drive_games_child(Path::new(r"F:\Other\Anime Games")));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn moves_a_disposable_directory_to_the_recycle_bin() {
+        use super::move_directory_to_recycle_bin;
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let source = std::env::temp_dir().join(format!("reina-recycle-test-{nonce}"));
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("only-test-file.txt"), b"reina recycle test").unwrap();
+        move_directory_to_recycle_bin(&source).unwrap();
+        assert!(!source.exists());
     }
 
     #[cfg(target_os = "windows")]
@@ -896,6 +1097,7 @@ mod tests {
                     OsStr::new("-t7z"),
                     OsStr::new("-mx=5"),
                     OsStr::new("-y"),
+                    OsStr::new("-bsp1"),
                     archive.as_os_str(),
                     OsStr::new("alicenation"),
                 ],

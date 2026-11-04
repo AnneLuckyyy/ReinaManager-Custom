@@ -475,11 +475,23 @@ function useUpdateCategoryGames() {
 				);
 			}
 		},
-		onSuccess: (_, { categoryId }) => {
+		onSuccess: (_, { categoryId, gameIds }, context) => {
+			// 管理分类会同时影响“游戏详情/右键中的所属分类”；不能只刷新
+			// 当前分类列表，否则其它入口会短暂保留旧归属。
+			const affectedGameIds = new Set([
+				...gameIds,
+				...(context?.previousGameIds ?? []),
+			]);
 			queryClient.invalidateQueries({
 				queryKey: collectionKeys.games(categoryId),
 				exact: true,
 			});
+			for (const gameId of affectedGameIds) {
+				queryClient.invalidateQueries({
+					queryKey: collectionKeys.gameCategories(gameId),
+					exact: true,
+				});
+			}
 			queryClient.invalidateQueries({ queryKey: collectionKeys.all });
 		},
 	});
@@ -488,16 +500,19 @@ function useUpdateCategoryGames() {
 /**
  * 更新分类排序顺序
  */
-function useUpdateCategorySortOrder() {
+function useReorderCategories() {
+	const queryClient = useQueryClient();
+
 	return useMutation({
-		mutationFn: async ({
-			categoryId,
-			sortOrder,
+		mutationFn: ({
+			parentId,
+			categoryIds,
 		}: {
-			categoryId: number;
-			sortOrder: number;
-		}) => {
-			await collectionService.updateCollection(categoryId, undefined, undefined, sortOrder);
+			parentId: number;
+			categoryIds: number[];
+		}) => collectionService.reorderCollectionCategories(parentId, categoryIds),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: collectionKeys.all });
 		},
 	});
 }
@@ -519,5 +534,5 @@ export {
 	useRenameGroup,
 	useSetGameCategories,
 	useUpdateCategoryGames,
-	useUpdateCategorySortOrder,
+	useReorderCategories,
 };
