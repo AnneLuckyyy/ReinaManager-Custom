@@ -1,3 +1,20 @@
+## [0.20.6](https://github.com/AnneLuckyyy/ReinaManager-Custom/releases/tag/v0.20.6) (2026-11-04)
+
+### 本改版新增功能
+
+- 支持主启动路径与备用启动路径；本地游戏可一键设为云端游戏并保留原路径。
+- 支持将游戏或应用的本地目录关联到分类，减少导入后的重复整理。
+- 新增 115 目录索引、分卷压缩包识别和手动游戏关联。
+- 新增游戏文件夹打包队列：显示打包与核验进度，核验成功后可按选择保留、移入回收站或清理原目录。
+- 新增独立应用页，可管理桌面应用、可执行文件与快捷方式。
+- 新增 CrystalDiskInfo 磁盘健康摘要。
+
+### 发布
+
+- 首次发布 ReinaManager Custom 的 Windows 安装包与 MSI；保留原项目 AGPL-3.0 许可证和署名。
+
+---
+
 ## [0.20.4](https://github.com/huoshen80/ReinaManager/compare/v0.20.3...v0.20.4) (2026-05-15)
 
 <details>
